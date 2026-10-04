@@ -1,0 +1,21 @@
+# version control and CI
+.git
+.github
+
+# local environments and secrets
+.venv
+.env
+
+# caches and build output
+**/__pycache__
+**/*.py[cod]
+.mypy_cache
+.pytest_cache
+.ruff_cache
+**/*.egg-info
+build
+dist
+
+# not needed to run the app
+tests
+docs
