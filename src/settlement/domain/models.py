@@ -43,6 +43,12 @@ def require_currency(field_name: str, value: str) -> None:
         raise InvalidModel(f"{field_name} must be a 3-letter currency code.")
 
 
+def require_type(field_name: str, value: object, expected: type) -> None:
+    # Type hints aren't enforced at runtime, so parsers could pass a plain string.
+    if not isinstance(value, expected):
+        raise InvalidModel(f"{field_name} must be a {expected.__name__}.")
+
+
 def require_aware(field_name: str, value: datetime) -> None:
     # A timestamp without a timezone is ambiguous: 09:00 in London or in New York?
     if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
@@ -85,6 +91,7 @@ class BreakType(StrEnum):
     DUPLICATE_BOOKING = "DUPLICATE_BOOKING"
     FUNDING_SHORTFALL = "FUNDING_SHORTFALL"
     STATIC_DATA = "STATIC_DATA"
+    CORPORATE_ACTION = "CORPORATE_ACTION"
 
 
 class ResolutionAction(StrEnum):
@@ -115,6 +122,7 @@ class Party:
     def __post_init__(self) -> None:
         require_text("party_id", self.party_id)
         require_text("name", self.name)
+        require_type("lei", self.lei, LEI)
 
 
 @dataclass(frozen=True, slots=True)
@@ -131,7 +139,7 @@ class SSI:
     def __post_init__(self) -> None:
         require_text("party_id", self.party_id)
         require_currency("currency", self.currency)
-        if not BIC_PATTERN.fullmatch(self.custodian_bic):
+        if not isinstance(self.custodian_bic, str) or not BIC_PATTERN.fullmatch(self.custodian_bic):
             raise InvalidModel(f"SSI custodian BIC must be valid: {self.custodian_bic!r}")
         require_text("safekeeping_account", self.safekeeping_account)
         require_text("cash_account", self.cash_account)
@@ -156,6 +164,11 @@ class Trade:
 
     def __post_init__(self) -> None:
         require_text("trade_id", self.trade_id)
+        require_type("isin", self.isin, ISIN)
+        require_type("side", self.side, Side)
+        require_type("counterparty", self.counterparty, Party)
+        require_type("settlement_method", self.settlement_method, SettlementMethod)
+        require_type("status", self.status, TradeStatus)
         require_positive("quantity", self.quantity)
         require_not_negative("price", self.price)
         require_currency("currency", self.currency)
@@ -203,6 +216,9 @@ class SettlementInstruction:
     def __post_init__(self) -> None:
         require_text("instruction_id", self.instruction_id)
         require_text("trade_id", self.trade_id)
+        require_type("isin", self.isin, ISIN)
+        require_type("side", self.side, Side)
+        require_type("ssi", self.ssi, SSI)
         require_positive("quantity", self.quantity)
         require_not_negative("consideration", self.consideration)
         require_currency("currency", self.currency)
@@ -227,6 +243,9 @@ class StatementLine:
     def __post_init__(self) -> None:
         require_text("line_id", self.line_id)
         require_text("source", self.source)
+        require_type("isin", self.isin, ISIN)
+        require_type("side", self.side, Side)
+        require_type("counterparty_lei", self.counterparty_lei, LEI)
         require_positive("quantity", self.quantity)
         require_not_negative("consideration", self.consideration)
         require_currency("currency", self.currency)
@@ -263,8 +282,7 @@ class Break:
 
     def __post_init__(self) -> None:
         require_text("break_id", self.break_id)
-        if not isinstance(self.break_type, BreakType):
-            raise InvalidModel("break_type must be a BreakType.")
+        require_type("break_type", self.break_type, BreakType)
         if self.ours is None and self.theirs is None:
             raise InvalidModel("Break needs at least one side (ours or theirs).")
         if not isinstance(self.evidence, tuple):
@@ -299,8 +317,8 @@ class Resolution:
     def __post_init__(self) -> None:
         require_text("resolution_id", self.resolution_id)
         require_text("break_id", self.break_id)
-        if not isinstance(self.action, ResolutionAction):
-            raise InvalidModel("action must be a ResolutionAction.")
+        require_type("action", self.action, ResolutionAction)
+        require_type("status", self.status, ResolutionStatus)
         require_text("rationale", self.rationale)
         require_text("proposed_by", self.proposed_by)
         if self.approved_by is not None:
