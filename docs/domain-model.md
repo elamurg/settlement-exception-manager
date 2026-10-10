@@ -196,6 +196,7 @@ classDiagram
         DUPLICATE_BOOKING
         FUNDING_SHORTFALL
         STATIC_DATA
+        CORPORATE_ACTION
     }
     class ResolutionAction {
         <<enumeration>>
