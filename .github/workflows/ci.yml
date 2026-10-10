@@ -12,6 +12,20 @@ permissions:
 jobs:
   checks:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: settlement
+          POSTGRES_PASSWORD: settlement-ci
+          POSTGRES_DB: settlement
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U settlement -d settlement"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v7
 
@@ -31,9 +45,14 @@ jobs:
         run: mypy src
 
       - name: Tests
-        run: pytest
+        run: pytest -rs
+        env:
+          DATABASE_URL: postgresql://settlement:settlement-ci@localhost:5432/settlement
 
       - name: Build
         run: |
           pip install build
           python -m build
+
+      - name: Docker image
+        run: docker build -t settlement-app:ci .
