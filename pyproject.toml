@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "code-review-agent"
+name = "settlement-exception"
 version = "0.1.0"
-description = "An automated pull request reviewer that posts structured, grounded review comments on GitHub."
+description = "Intraday reconciliation and exception management for securities settlement."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
