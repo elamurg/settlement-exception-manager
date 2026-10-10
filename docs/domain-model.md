@@ -83,6 +83,8 @@ classDiagram
         counterparty_lei: LEI
         intended_settlement_date: date
         reference: str
+        counterparty_bic: str | None
+        counterparty_account: str | None
     }
 
     class FieldDifference {

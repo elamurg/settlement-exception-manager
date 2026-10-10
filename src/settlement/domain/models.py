@@ -223,6 +223,10 @@ class StatementLine:
     counterparty_lei: LEI
     intended_settlement_date: date
     reference: str
+    # The counterparty's settlement details as the custodian used them. Compared with
+    # the SSI on file to find SSI mismatches. Optional: not every statement carries them.
+    counterparty_bic: str | None = None
+    counterparty_account: str | None = None
 
     def __post_init__(self) -> None:
         require_text("line_id", self.line_id)
@@ -231,6 +235,13 @@ class StatementLine:
         require_not_negative("consideration", self.consideration)
         require_currency("currency", self.currency)
         require_text("reference", self.reference)
+        if self.counterparty_bic is not None and (
+            not isinstance(self.counterparty_bic, str)
+            or not BIC_PATTERN.fullmatch(self.counterparty_bic)
+        ):
+            raise InvalidModel(f"counterparty BIC must be valid: {self.counterparty_bic!r}")
+        if self.counterparty_account is not None:
+            require_text("counterparty_account", self.counterparty_account)
 
 
 @dataclass(frozen=True, slots=True)

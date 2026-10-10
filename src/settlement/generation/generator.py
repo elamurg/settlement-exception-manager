@@ -17,6 +17,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
 
 from settlement.domain.models import (
+    SSI,
     BreakType,
     FieldDifference,
     SettlementMethod,
@@ -25,13 +26,20 @@ from settlement.domain.models import (
     Trade,
     TradeStatus,
 )
-from settlement.generation.universe import make_instruments, make_parties
+from settlement.generation.universe import (
+    make_account,
+    make_bic,
+    make_instruments,
+    make_parties,
+    make_ssis,
+)
 
 GENERATOR_VERSION = "1"
 
 # Break types a book-versus-statement pair can show. The others need data these two
-# files don't carry (SSIs, cash balances, corporate action notices).
+# files don't carry (cash balances, corporate action notices).
 INJECTABLE = (
+    BreakType.SSI_MISMATCH,
     BreakType.STATIC_DATA,
     BreakType.QUANTITY_BREAK,
     BreakType.PRICE_BREAK,
@@ -40,16 +48,17 @@ INJECTABLE = (
     BreakType.DUPLICATE_BOOKING,
 )
 
-# Probability that a trade gets each break: 10% in total. Static data is weighted
-# highest, reflecting published fail causes.
+# Probability that a trade gets each break: 10% in total. SSI and static data issues
+# are weighted highest, reflecting published fail causes.
 DEFAULT_BREAK_RATES: Mapping[BreakType, float] = MappingProxyType(
     {
-        BreakType.STATIC_DATA: 0.03,
-        BreakType.QUANTITY_BREAK: 0.015,
-        BreakType.PRICE_BREAK: 0.015,
-        BreakType.DATE_MISMATCH: 0.015,
-        BreakType.UNMATCHED_INSTRUCTION: 0.015,
-        BreakType.DUPLICATE_BOOKING: 0.01,
+        BreakType.SSI_MISMATCH: 0.03,
+        BreakType.STATIC_DATA: 0.025,
+        BreakType.QUANTITY_BREAK: 0.01,
+        BreakType.PRICE_BREAK: 0.01,
+        BreakType.DATE_MISMATCH: 0.01,
+        BreakType.UNMATCHED_INSTRUCTION: 0.01,
+        BreakType.DUPLICATE_BOOKING: 0.005,
     }
 )
 
@@ -98,6 +107,14 @@ class GeneratedData:
     book: tuple[Trade, ...]
     statement: tuple[StatementLine, ...]
     breaks: tuple[InjectedBreak, ...]
+    ssis: tuple[SSI, ...]  # the settlement instructions on file, one per party and currency
+
+    def ssi_for(self, trade: Trade) -> SSI:
+        return _ssi_lookup(self.ssis)[(trade.counterparty.party_id, trade.currency)]
+
+
+def _ssi_lookup(ssis: tuple[SSI, ...]) -> dict[tuple[str, str], SSI]:
+    return {(ssi.party_id, ssi.currency): ssi for ssi in ssis}
 
 
 def money(amount: Decimal) -> Decimal:
@@ -128,7 +145,7 @@ def _pick_break(rng: random.Random, rates: Mapping[BreakType, float]) -> BreakTy
     return None
 
 
-def _statement_fields(trade: Trade) -> dict[str, object]:
+def _statement_fields(trade: Trade, ssi: SSI) -> dict[str, object]:
     """What the custodian reports for a trade when nothing has gone wrong."""
     return {
         "source": SOURCE,
@@ -140,6 +157,8 @@ def _statement_fields(trade: Trade) -> dict[str, object]:
         "counterparty_lei": trade.counterparty.lei,
         "intended_settlement_date": trade.intended_settlement_date,
         "reference": trade.trade_id,
+        "counterparty_bic": ssi.custodian_bic,
+        "counterparty_account": ssi.safekeeping_account,
     }
 
 
@@ -147,6 +166,8 @@ def generate(config: GenerationConfig) -> GeneratedData:
     rng = random.Random(config.seed)
     instruments = make_instruments(rng, INSTRUMENT_COUNT)
     parties = make_parties(rng, PARTY_COUNT)
+    ssis = tuple(make_ssis(rng, parties))
+    ssi_on_file = _ssi_lookup(ssis)
     settlement_date = next_business_day(config.trade_date)
 
     book: list[Trade] = []
@@ -178,7 +199,8 @@ def generate(config: GenerationConfig) -> GeneratedData:
             status=TradeStatus.INSTRUCTED,
         )
         book.append(trade)
-        row = _statement_fields(trade)
+        ssi = ssi_on_file[(trade.counterparty.party_id, trade.currency)]
+        row = _statement_fields(trade, ssi)
 
         if break_type is None:
             statement_rows.append(row)
@@ -187,7 +209,25 @@ def generate(config: GenerationConfig) -> GeneratedData:
         evidence: tuple[FieldDifference, ...]
         related: tuple[str, ...] = ()
 
-        if break_type == BreakType.UNMATCHED_INSTRUCTION:
+        if break_type == BreakType.SSI_MISMATCH:
+            # The custodian settled against stale details: usually the account, sometimes
+            # the custodian itself.
+            if rng.random() < 0.7:
+                theirs_account = make_account(rng)
+                row["counterparty_account"] = theirs_account
+                evidence = (
+                    FieldDifference(
+                        "counterparty_account", ours=ssi.safekeeping_account, theirs=theirs_account
+                    ),
+                )
+            else:
+                theirs_bic = make_bic(rng, ssi.custodian_bic[4:6])
+                row["counterparty_bic"] = theirs_bic
+                evidence = (
+                    FieldDifference("counterparty_bic", ours=ssi.custodian_bic, theirs=theirs_bic),
+                )
+            statement_rows.append(row)
+        elif break_type == BreakType.UNMATCHED_INSTRUCTION:
             evidence = (FieldDifference("statement_line", ours="present", theirs="missing"),)
         elif break_type == BreakType.DUPLICATE_BOOKING:
             duplicate = replace(trade, trade_id=f"T-{config.trades + len(duplicates) + 1:06d}")
@@ -256,4 +296,6 @@ def generate(config: GenerationConfig) -> GeneratedData:
         )
         for break_type, trade_id, evidence, related in pending
     )
-    return GeneratedData(config=config, book=tuple(book), statement=statement, breaks=breaks)
+    return GeneratedData(
+        config=config, book=tuple(book), statement=statement, breaks=breaks, ssis=ssis
+    )

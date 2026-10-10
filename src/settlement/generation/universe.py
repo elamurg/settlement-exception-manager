@@ -7,10 +7,11 @@ later sees the same thing it would see in real data.
 import random
 import string
 from dataclasses import dataclass
+from datetime import date
 
 from settlement.domain.errors import InvalidIdentifier
 from settlement.domain.identifiers import ISIN, LEI
-from settlement.domain.models import Party
+from settlement.domain.models import SSI, Party
 
 _ALPHANUMERIC = string.ascii_uppercase + string.digits
 
@@ -22,6 +23,10 @@ _NAME_STEMS = [
     "Fenwick", "Calder", "Holborn", "Lindqvist", "Marlow", "Ostrava", "Pennant", "Whitcombe",
 ]  # fmt: skip
 _NAME_KINDS = ["Securities", "Capital Markets", "Bank", "Asset Management", "Brokers"]
+
+# Where a custodian for each currency is based, for the country part of its BIC.
+_CUSTODIAN_COUNTRIES = {"GBP": ["GB"], "EUR": ["DE", "FR", "NL", "IE"], "USD": ["US"]}
+SSI_VALID_FROM = date(2026, 1, 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,4 +73,30 @@ def make_parties(rng: random.Random, count: int) -> list[Party]:
     return [
         Party(party_id=f"CP-{number:03d}", name=name, lei=make_lei(rng))
         for number, name in enumerate(chosen, start=1)
+    ]
+
+
+def make_bic(rng: random.Random, country: str) -> str:
+    """A random 8-character BIC: bank code, country, location."""
+    bank = "".join(rng.choices(string.ascii_uppercase, k=4))
+    return bank + country + "".join(rng.choices(_ALPHANUMERIC, k=2))
+
+
+def make_account(rng: random.Random) -> str:
+    return "".join(rng.choices(string.digits, k=10))
+
+
+def make_ssis(rng: random.Random, parties: list[Party]) -> list[SSI]:
+    """One SSI per counterparty per currency: where that counterparty settles."""
+    return [
+        SSI(
+            party_id=party.party_id,
+            currency=currency,
+            custodian_bic=make_bic(rng, rng.choice(countries)),
+            safekeeping_account=make_account(rng),
+            cash_account=make_account(rng),
+            valid_from=SSI_VALID_FROM,
+        )
+        for party in parties
+        for currency, countries in sorted(_CUSTODIAN_COUNTRIES.items())
     ]
