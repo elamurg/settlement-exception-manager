@@ -11,3 +11,11 @@ class InvalidIdentifier(DomainError):
 
 class InvalidModel(DomainError):
     """Raised when an invalid model is used."""
+
+
+class IllegalTransition(DomainError):
+    """Raised when a trade is moved to a status its current status does not allow."""
+
+
+class InvalidPenaltyInput(DomainError):
+    """Raised when penalty inputs are impossible (negative amount, dates out of order...)."""
