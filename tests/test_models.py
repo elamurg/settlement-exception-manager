@@ -424,3 +424,42 @@ def test_changing_a_trade_creates_a_new_object() -> None:
 def test_invalid_model_is_a_domain_error() -> None:
     with pytest.raises(DomainError):
         replace(make_trade(), quantity=Decimal("0"))
+
+
+# Runtime type checks: parsers build these from text, so plain strings must be rejected
+
+
+@pytest.mark.parametrize(
+    ("make", "field", "value"),
+    [
+        (make_party, "lei", "HWUPKR0MPOU8FGXBT394"),
+        (make_trade, "isin", "DE0007164600"),
+        (make_trade, "side", "BUY"),
+        (make_trade, "counterparty", "CP-001"),
+        (make_trade, "settlement_method", "DVP"),
+        (make_trade, "status", "BOOKED"),
+        (make_instruction, "isin", "DE0007164600"),
+        (make_instruction, "side", "BUY"),
+        (make_instruction, "ssi", "SSI-1"),
+        (make_statement_line, "isin", "DE0007164600"),
+        (make_statement_line, "side", "BUY"),
+        (make_statement_line, "counterparty_lei", "HWUPKR0MPOU8FGXBT394"),
+        (make_resolution, "status", "PROPOSED"),
+    ],
+)
+def test_plain_strings_are_rejected_for_typed_fields(
+    make: Callable[[], Any], field: str, value: str
+) -> None:
+    with pytest.raises(InvalidModel, match=field):
+        replace(make(), **{field: value})
+
+
+def test_ssi_bic_must_be_a_string() -> None:
+    with pytest.raises(InvalidModel, match="BIC"):
+        replace(make_ssi(), custodian_bic=None)  # type: ignore[arg-type]
+
+
+def test_corporate_action_break_type_exists() -> None:
+    corporate_action = replace(make_break(), break_type=BreakType.CORPORATE_ACTION)
+
+    assert corporate_action.break_type == "CORPORATE_ACTION"
