@@ -16,6 +16,7 @@ import pytest
 
 from settlement.domain.identifiers import ISIN, LEI
 from settlement.domain.models import (
+    SSI,
     BreakType,
     FieldDifference,
     SettlementMethod,
@@ -44,8 +45,10 @@ def busy() -> GeneratedData:
     return generate(BUSY)
 
 
-def observed_differences(trade: Trade, line: StatementLine | None) -> tuple[FieldDifference, ...]:
-    """Compare a trade with the custodian's line for it, field by field."""
+def observed_differences(
+    trade: Trade, ssi: SSI, line: StatementLine | None
+) -> tuple[FieldDifference, ...]:
+    """Compare a trade, and the SSI we hold for it, with the custodian's line, field by field."""
     if line is None:
         return (FieldDifference("statement_line", ours="present", theirs="missing"),)
     pairs = [
@@ -60,6 +63,8 @@ def observed_differences(trade: Trade, line: StatementLine | None) -> tuple[Fiel
             trade.intended_settlement_date.isoformat(),
             line.intended_settlement_date.isoformat(),
         ),
+        ("counterparty_bic", ssi.custodian_bic, str(line.counterparty_bic)),
+        ("counterparty_account", ssi.safekeeping_account, str(line.counterparty_account)),
     ]
     return tuple(
         FieldDifference(name, ours, theirs) for name, ours, theirs in pairs if ours != theirs
@@ -77,7 +82,7 @@ def test_manifest_describes_exactly_the_differences_in_the_data(busy: GeneratedD
     for trade in busy.book:
         if trade.trade_id in duplicate_ids:
             continue
-        differences = observed_differences(trade, lines.get(trade.trade_id))
+        differences = observed_differences(trade, busy.ssi_for(trade), lines.get(trade.trade_id))
         item = injected.get(trade.trade_id)
 
         if item is None:
@@ -90,6 +95,7 @@ def test_manifest_describes_exactly_the_differences_in_the_data(busy: GeneratedD
 
 def test_each_break_changes_the_field_its_type_says(busy: GeneratedData) -> None:
     expected_field = {
+        BreakType.SSI_MISMATCH: {"counterparty_account", "counterparty_bic"},
         BreakType.STATIC_DATA: "counterparty_lei",
         BreakType.QUANTITY_BREAK: "quantity",
         BreakType.PRICE_BREAK: "consideration",
@@ -98,9 +104,9 @@ def test_each_break_changes_the_field_its_type_says(busy: GeneratedData) -> None
         BreakType.DUPLICATE_BOOKING: "booking_count",
     }
     for item in busy.breaks:
-        assert [difference.field for difference in item.evidence] == [
-            expected_field[item.break_type]
-        ]
+        (difference,) = item.evidence
+        allowed = expected_field[item.break_type]
+        assert difference.field in (allowed if isinstance(allowed, set) else {allowed})
 
 
 def test_every_injectable_type_appears(busy: GeneratedData) -> None:
@@ -219,7 +225,10 @@ def test_zero_break_rate_gives_a_clean_statement() -> None:
 
     assert clean.breaks == ()
     assert len(clean.book) == len(clean.statement) == 500
-    assert all(observed_differences(trade, lines[trade.trade_id]) == () for trade in clean.book)
+    assert all(
+        observed_differences(trade, clean.ssi_for(trade), lines[trade.trade_id]) == ()
+        for trade in clean.book
+    )
 
 
 @pytest.mark.parametrize("break_type", INJECTABLE)
@@ -249,7 +258,7 @@ def test_scaled_rates_keep_the_mix() -> None:
 @pytest.mark.parametrize(
     "rates",
     [
-        {BreakType.SSI_MISMATCH: 0.1},  # needs SSI data the files don't carry
+        {BreakType.FUNDING_SHORTFALL: 0.1},  # needs cash balances the files don't carry
         {BreakType.STATIC_DATA: -0.1},
         {BreakType.STATIC_DATA: 0.6, BreakType.PRICE_BREAK: 0.6},
     ],
@@ -300,3 +309,31 @@ def test_command_line_rejects_bad_rates(capsys: pytest.CaptureFixture[str]) -> N
         main(["--trades", "10", "--seed", "1", "--break-rate", "1.5"])
 
     assert "at most 1" in capsys.readouterr().err
+
+
+def test_ssi_mismatches_change_the_account_or_the_custodian(busy: GeneratedData) -> None:
+    fields = [
+        item.evidence[0].field for item in busy.breaks if item.break_type == BreakType.SSI_MISMATCH
+    ]
+
+    assert {"counterparty_account", "counterparty_bic"} <= set(fields)
+    assert fields.count("counterparty_account") > fields.count("counterparty_bic")
+
+
+def test_a_wrong_custodian_is_in_the_same_country(busy: GeneratedData) -> None:
+    for item in busy.breaks:
+        (difference,) = item.evidence
+        if difference.field == "counterparty_bic":
+            assert difference.ours[4:6] == difference.theirs[4:6]
+
+
+def test_every_party_has_an_ssi_for_every_currency(busy: GeneratedData) -> None:
+    for trade in busy.book:
+        ssi = busy.ssi_for(trade)
+        assert (ssi.party_id, ssi.currency) == (trade.counterparty.party_id, trade.currency)
+
+
+def test_ssi_and_static_data_are_the_most_common_by_default() -> None:
+    rates = sorted(DEFAULT_BREAK_RATES, key=DEFAULT_BREAK_RATES.__getitem__, reverse=True)
+
+    assert rates[:2] == [BreakType.SSI_MISMATCH, BreakType.STATIC_DATA]

@@ -25,6 +25,8 @@ BOOK_COLUMNS = [
     "counterparty_id",
     "counterparty_name",
     "counterparty_lei",
+    "counterparty_bic",
+    "counterparty_account",
     "trade_date",
     "intended_settlement_date",
     "settlement_method",
@@ -42,6 +44,8 @@ STATEMENT_COLUMNS = [
     "counterparty_lei",
     "intended_settlement_date",
     "reference",
+    "counterparty_bic",
+    "counterparty_account",
 ]
 
 
@@ -57,6 +61,7 @@ def write_book(data: GeneratedData, path: Path) -> None:
         writer = csv.writer(file)
         writer.writerow(BOOK_COLUMNS)
         for trade in data.book:
+            ssi = data.ssi_for(trade)  # the settlement details we hold on file
             writer.writerow(
                 [
                     trade.trade_id,
@@ -69,6 +74,8 @@ def write_book(data: GeneratedData, path: Path) -> None:
                     trade.counterparty.party_id,
                     trade.counterparty.name,
                     trade.counterparty.lei,
+                    ssi.custodian_bic,
+                    ssi.safekeeping_account,
                     trade.trade_date.isoformat(),
                     trade.intended_settlement_date.isoformat(),
                     trade.settlement_method,
@@ -94,6 +101,8 @@ def write_statement(data: GeneratedData, path: Path) -> None:
                     line.counterparty_lei,
                     line.intended_settlement_date.isoformat(),
                     line.reference,
+                    line.counterparty_bic,
+                    line.counterparty_account,
                 ]
             )
 
