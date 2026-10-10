@@ -22,3 +22,6 @@ htmlcov/
 *.egg-info/
 build/
 dist/
+
+#generated data (python -m settlement.generation)
+data/generated/
