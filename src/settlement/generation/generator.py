@@ -9,6 +9,7 @@ economic field. An injected break changes exactly one thing about that pairing, 
 manifest records what changed.
 """
 
+import math
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
@@ -84,8 +85,9 @@ class GenerationConfig:
         for break_type, rate in self.break_rates.items():
             if break_type not in INJECTABLE:
                 raise ValueError(f"{break_type} can't be injected into a book and statement")
-            if rate < 0:
-                raise ValueError(f"rate for {break_type} must not be negative")
+            # NaN fails every comparison, so it would slip past `rate < 0` and the sum check.
+            if not math.isfinite(rate) or rate < 0:
+                raise ValueError(f"rate for {break_type} must be a finite, non-negative number")
         if sum(self.break_rates.values()) > 1:
             raise ValueError("break rates must add up to at most 1")
 

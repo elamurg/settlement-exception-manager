@@ -260,6 +260,8 @@ def test_scaled_rates_keep_the_mix() -> None:
     [
         {BreakType.FUNDING_SHORTFALL: 0.1},  # needs cash balances the files don't carry
         {BreakType.STATIC_DATA: -0.1},
+        {BreakType.STATIC_DATA: float("nan")},
+        {BreakType.STATIC_DATA: float("inf")},
         {BreakType.STATIC_DATA: 0.6, BreakType.PRICE_BREAK: 0.6},
     ],
 )
@@ -304,11 +306,17 @@ def test_files_are_identical_for_the_same_seed(tmp_path: Path) -> None:
         assert (tmp_path / "first" / name).read_bytes() == (tmp_path / "second" / name).read_bytes()
 
 
-def test_command_line_rejects_bad_rates(capsys: pytest.CaptureFixture[str]) -> None:
+@pytest.mark.parametrize(
+    ("rate", "message"),
+    [("1.5", "at most 1"), ("nan", "finite"), ("inf", "finite"), ("-0.1", "non-negative")],
+)
+def test_command_line_rejects_bad_rates(
+    rate: str, message: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     with pytest.raises(SystemExit):
-        main(["--trades", "10", "--seed", "1", "--break-rate", "1.5"])
+        main(["--trades", "10", "--seed", "1", "--break-rate", rate])
 
-    assert "at most 1" in capsys.readouterr().err
+    assert message in capsys.readouterr().err
 
 
 def test_ssi_mismatches_change_the_account_or_the_custodian(busy: GeneratedData) -> None:
