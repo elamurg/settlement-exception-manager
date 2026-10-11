@@ -293,6 +293,27 @@ def test_instruction_ssi_must_be_in_the_instruction_currency() -> None:
         replace(make_instruction(), ssi=usd_ssi)
 
 
+# Settlement details on a statement line (optional, for SSI mismatches)
+
+
+def test_statement_line_settlement_details_are_optional() -> None:
+    line = make_statement_line()
+
+    assert (line.counterparty_bic, line.counterparty_account) == (None, None)
+    replace(line, counterparty_bic="DEUTDEFF500", counterparty_account="0012345678")
+
+
+@pytest.mark.parametrize("bic", ["deutdeff", "DEUTDE", "", 12345678])
+def test_statement_line_bic_must_be_valid(bic: object) -> None:
+    with pytest.raises(InvalidModel, match="BIC"):
+        replace(make_statement_line(), counterparty_bic=bic)  # type: ignore[arg-type]
+
+
+def test_statement_line_account_cannot_be_blank() -> None:
+    with pytest.raises(InvalidModel, match="counterparty_account"):
+        replace(make_statement_line(), counterparty_account=" ")
+
+
 # FieldDifference
 
 
