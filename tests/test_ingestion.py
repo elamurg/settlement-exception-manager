@@ -160,6 +160,9 @@ def test_header_only_gives_no_rows() -> None:
         ({"quantity": "NaN"}, "quantity", "not a finite number"),
         ({"price": ""}, "price", "is empty"),
         ({"trade_date": "05/10/2026"}, "trade_date", "not a date"),
+        ({"trade_date": "20261005"}, "trade_date", "not a date"),  # ISO basic format
+        ({"trade_date": "2026-W41-1"}, "trade_date", "not a date"),  # ISO week date
+        ({"trade_date": "2026-02-30"}, "trade_date", "not a date"),  # right shape, no such day
         ({"isin": "DE0007164601"}, "isin", "check digit"),
         ({"isin": "DE000716460"}, "isin", "format"),
         ({"counterparty_lei": "HWUPKR0MPOU8FGXBT395"}, "counterparty_lei", "check digits"),
@@ -281,6 +284,31 @@ def test_quoted_fields_and_line_numbers(tmp_path: Path) -> None:
 
     with pytest.raises(ParseError, match=r"^trades.csv line 3, field 'price'"):
         load_book(path)
+
+
+@pytest.mark.parametrize(
+    ("bad_line", "message"),
+    [
+        ('"Northgate"Securities', "',' expected after '\"'"),  # junk after a closing quote
+        ('"Northgate', "unexpected end of data"),  # quote never closed
+        ("x" * 200_000, "field larger than field limit"),
+    ],
+    ids=["junk_after_quote", "unclosed_quote", "huge_field"],
+)
+def test_broken_csv_is_a_parse_error_with_the_line(bad_line: str, message: str) -> None:
+    header, good = csv_lines([BOOK_ROW])
+
+    with pytest.raises(ParseError) as caught:
+        parse_book([header + "\n", good + "\n", bad_line + "\n"])
+
+    assert caught.value.line == 3
+    assert "is not valid CSV" in str(caught.value)
+    assert message in str(caught.value)
+
+
+def test_broken_header_is_a_parse_error() -> None:
+    with pytest.raises(ParseError, match="line 1: is not valid CSV"):
+        parse_book(['"trade_id\n'])
 
 
 def test_parse_error_is_a_domain_error() -> None:

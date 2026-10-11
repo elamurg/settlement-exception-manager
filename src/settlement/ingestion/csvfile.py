@@ -9,6 +9,7 @@ are upper-cased, because the domain types are strict and expect normalised input
 """
 
 import csv
+import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -18,6 +19,9 @@ from enum import StrEnum
 from settlement.domain.errors import InvalidIdentifier, InvalidModel
 from settlement.domain.identifiers import ISIN, LEI
 from settlement.ingestion.errors import ParseError
+
+# date.fromisoformat also accepts 20261011 and 2026-W41-7; only YYYY-MM-DD is allowed here.
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,8 +59,10 @@ class Row:
 
     def date(self, field: str) -> date:
         raw = self.text(field)
+        if not _ISO_DATE.fullmatch(raw):
+            raise self.error(f"is not a date (YYYY-MM-DD): {raw!r}", field)
         try:
-            return date.fromisoformat(raw)
+            return date.fromisoformat(raw)  # still rejects impossible dates like 2026-02-30
         except ValueError:
             raise self.error(f"is not a date (YYYY-MM-DD): {raw!r}", field) from None
 
@@ -94,8 +100,22 @@ def read_rows(
     required: Iterable[str],
     optional: Iterable[str] = (),
 ) -> Iterator[Row]:
-    reader = csv.reader(lines)
-    header = next(reader, None)
+    # strict: broken quoting (e.g. "x"y) raises instead of being read as something else.
+    reader = csv.reader(lines, strict=True)
+
+    def next_record() -> list[str] | None:
+        """The next record, or None at the end. csv.Error (broken quoting, a field over
+        the size limit) becomes a ParseError with the line number."""
+        try:
+            return next(reader)
+        except StopIteration:
+            return None
+        except csv.Error as error:
+            raise ParseError(
+                source, max(reader.line_num, 1), f"is not valid CSV: {error}"
+            ) from None
+
+    header = next_record()
     if header is None:
         raise ParseError(source, 1, "file is empty; expected a header row")
 
@@ -111,7 +131,7 @@ def read_rows(
     if unknown:
         raise ParseError(source, 1, f"unknown columns: {', '.join(unknown)}")
 
-    for fields in reader:
+    while (fields := next_record()) is not None:
         if not fields:
             continue
         if len(fields) != len(header):
