@@ -1,4 +1,8 @@
-"""Tests for settlement.domain.penalties"""
+"""Tests for settlement.domain.penalties.
+
+Every expected figure is computed by hand: EUR 1,000,000 failing at 1bp is EUR 100.00 per
+business day on the full amount. Dates are a real week in October 2026.
+"""
 
 from datetime import date
 from decimal import Decimal
@@ -16,6 +20,7 @@ from settlement.domain.penalties import (
     round_money,
 )
 
+WED = date(2026, 10, 7)
 THU = date(2026, 10, 8)
 FRI = date(2026, 10, 9)
 SAT = date(2026, 10, 10)
@@ -27,7 +32,7 @@ NO_HOLIDAYS: frozenset[date] = frozenset()
 MON_HOLIDAY: frozenset[date] = frozenset({MON})
 
 AMOUNT = Decimal("1000000")
-RATE = Decimal("0.0001")  # 100 pounds per day on the full amount
+RATE = Decimal("0.0001")  # 100.00 per day
 
 
 def penalty(
@@ -39,58 +44,10 @@ def penalty(
     holidays: frozenset[date] = NO_HOLIDAYS,
     partials: tuple[PartialSettlement, ...] = (),
 ) -> Decimal:
-    """accrue_penalty with sensible defaults"""
+    """accrue_penalty with sensible defaults; each test overrides only what it is about."""
     return accrue_penalty(
         failed_amount, daily_rate, intended_settlement_date, settlement_date, holidays, partials
     )
-
-
-def test_same_day_settlement() -> None:
-    assert penalty(daily_rate=RATE, intended_settlement_date=FRI, settlement_date=FRI) == Decimal(
-        "0.00"
-    )
-
-
-def test_one_day_penalty() -> None:
-    assert penalty(intended_settlement_date=THU, settlement_date=FRI) == Decimal("100.00")
-
-
-def test_weekend_penalty() -> None:
-    assert penalty(
-        intended_settlement_date=FRI, settlement_date=MON, holidays=NO_HOLIDAYS
-    ) == Decimal("100.00")
-
-
-def test_holiday_penalty() -> None:
-    assert penalty(
-        intended_settlement_date=FRI, settlement_date=TUE, holidays=MON_HOLIDAY
-    ) == Decimal("100.00")
-
-
-def test_partial_penalty() -> None:
-    assert penalty(
-        intended_settlement_date=THU,
-        settlement_date=MON,
-        holidays=NO_HOLIDAYS,
-        partials=(PartialSettlement(settled_on=FRI, amount=Decimal("500000")),),
-    ) == Decimal("150.00")
-
-
-@pytest.mark.parametrize(
-    ("amount", "expected"),
-    [
-        ("123.451", "123.45"),
-        ("123.455", "123.46"),
-        ("0.005", "0.01"),
-        ("100", "100.00"),
-    ],
-)
-def test_round_money(amount: str, expected: str) -> None:
-    assert str(round_money(Decimal(amount))) == expected
-
-
-def test_rounding_is_per_day() -> None:
-    assert penalty(failed_amount=Decimal("1234567.89")) == Decimal("370.38")
 
 
 @pytest.mark.parametrize(
@@ -111,11 +68,11 @@ def test_is_business_day(day: date, holidays: frozenset[date], expected: bool) -
 @pytest.mark.parametrize(
     ("start", "end", "holidays", "expected"),
     [
-        (THU, TUE, NO_HOLIDAYS, [THU, FRI, MON]),  # weekend skipped
-        (THU, TUE, MON_HOLIDAY, [THU, FRI]),  # holiday skipped
-        (THU, FRI, NO_HOLIDAYS, [THU]),  # start included, end excluded
-        (THU, THU, NO_HOLIDAYS, []),  # same day
-        (SAT, MON, NO_HOLIDAYS, []),  # only weekend days
+        pytest.param(THU, TUE, NO_HOLIDAYS, [THU, FRI, MON], id="weekend_skipped"),
+        pytest.param(THU, TUE, MON_HOLIDAY, [THU, FRI], id="holiday_skipped"),
+        pytest.param(THU, FRI, NO_HOLIDAYS, [THU], id="start_included_end_excluded"),
+        pytest.param(THU, THU, NO_HOLIDAYS, [], id="same_day"),
+        pytest.param(SAT, MON, NO_HOLIDAYS, [], id="only_weekend"),
     ],
 )
 def test_business_days(
@@ -124,34 +81,141 @@ def test_business_days(
     assert business_days(start, end, holidays) == expected
 
 
-def test_daily_rate_for() -> None:
+def test_daily_rate_for_returns_configured_rate() -> None:
     rates = {AssetClass.LIQUID_SHARES: Decimal("0.0001")}
-
     assert daily_rate_for(AssetClass.LIQUID_SHARES, rates) == Decimal("0.0001")
+
+
+def test_daily_rate_for_missing_asset_class_raises() -> None:
+    rates = {AssetClass.LIQUID_SHARES: Decimal("0.0001")}
     with pytest.raises(InvalidPenaltyInput):
         daily_rate_for(AssetClass.CORPORATE_BONDS, rates)
 
 
-# i didnt write this test, i havent learned how to test paramater inputs yet
-WED = date(2026, 10, 7)
+@pytest.mark.parametrize(
+    ("amount", "expected"),
+    [
+        ("123.451", "123.45"),
+        ("123.455", "123.46"),
+        ("123.459", "123.46"),
+        ("0.004", "0.00"),
+        ("0.005", "0.01"),
+        ("100", "100.00"),
+    ],
+)
+def test_round_money(amount: str, expected: str) -> None:
+    assert str(round_money(Decimal(amount))) == expected
 
 
+def test_one_day_rounds_to_the_cent() -> None:
+    assert penalty(failed_amount=Decimal("1234567.89"), settlement_date=FRI) == Decimal("123.46")
+
+
+def test_rounding_is_per_day_not_on_the_total() -> None:
+    assert penalty(failed_amount=Decimal("1234567.89")) == Decimal("370.38")
+
+
+@pytest.mark.parametrize(
+    ("intended", "settled", "holidays", "expected"),
+    [
+        pytest.param(THU, THU, NO_HOLIDAYS, "0", id="same_day_resolution"),
+        pytest.param(THU, FRI, NO_HOLIDAYS, "100.00", id="one_day"),
+        pytest.param(THU, TUE, NO_HOLIDAYS, "300.00", id="over_weekend"),
+        pytest.param(THU, TUE, MON_HOLIDAY, "200.00", id="over_weekend_and_holiday"),
+        pytest.param(FRI, MON, NO_HOLIDAYS, "100.00", id="friday_to_monday"),
+        pytest.param(FRI, TUE, MON_HOLIDAY, "100.00", id="friday_to_tuesday_monday_holiday"),
+        pytest.param(MON, TUE, MON_HOLIDAY, "0", id="intended_date_is_holiday"),
+    ],
+)
+def test_penalty_figures(
+    intended: date, settled: date, holidays: frozenset[date], expected: str
+) -> None:
+    result = penalty(intended_settlement_date=intended, settlement_date=settled, holidays=holidays)
+    assert result == Decimal(expected)
+
+
+def test_zero_rate_is_allowed() -> None:
+    assert penalty(daily_rate=Decimal("0")) == Decimal("0")
+
+
+def test_partial_on_friday() -> None:
+    partials = (PartialSettlement(FRI, Decimal("600000")),)
+    assert penalty(partials=partials) == Decimal("180.00")  # 100 + 40 + 40
+
+
+def test_partial_on_intended_settlement_date() -> None:
+    partials = (PartialSettlement(THU, Decimal("600000")),)
+    assert penalty(partials=partials) == Decimal("120.00")  # 40 + 40 + 40
+
+
+def test_two_partials() -> None:
+    partials = (
+        PartialSettlement(FRI, Decimal("300000")),
+        PartialSettlement(MON, Decimal("300000")),
+    )
+    assert penalty(partials=partials) == Decimal("210.00")
+
+
+def test_partial_on_weekend_counts_from_next_business_day() -> None:
+    partials = (PartialSettlement(SAT, Decimal("600000")),)
+    assert penalty(partials=partials) == Decimal("240.00")
+
+
+def test_partial_settling_thursday_to_monday() -> None:
+    partials = (PartialSettlement(FRI, Decimal("500000")),)
+    result = penalty(settlement_date=MON, partials=partials)
+    assert result == Decimal("150.00")
+
+
+@pytest.mark.parametrize(
+    ("settled_on", "amount"),
+    [
+        pytest.param(FRI, Decimal("0"), id="zero"),
+        pytest.param(FRI, Decimal("-500000"), id="negative"),
+        pytest.param(FRI, Decimal("NaN"), id="nan"),
+        pytest.param(FRI, Decimal("Infinity"), id="infinity"),
+        pytest.param(FRI, 500000.0, id="float"),
+        pytest.param("2026-10-09", Decimal("500000"), id="date_as_text"),
+    ],
+)
+def test_invalid_partial_settlement_raises(settled_on: object, amount: object) -> None:
+    # Built inside the test, not in the list above: the list is evaluated when the file
+    # loads, and an error there would stop every test in this file from running.
+    with pytest.raises(InvalidPenaltyInput):
+        PartialSettlement(settled_on, amount)  # type: ignore[arg-type]
+
+
+# Each case changes one argument of an otherwise valid call; penalty(**overrides)
+# unpacks {"failed_amount": X} into penalty(failed_amount=X).
 @pytest.mark.parametrize(
     "overrides",
     [
         pytest.param({"failed_amount": Decimal("0")}, id="zero_amount"),
         pytest.param({"failed_amount": Decimal("-1")}, id="negative_amount"),
         pytest.param({"failed_amount": 1000000.0}, id="float_amount"),
+        pytest.param({"failed_amount": Decimal("NaN")}, id="nan_amount"),
+        pytest.param({"failed_amount": Decimal("Infinity")}, id="infinite_amount"),
+        pytest.param({"daily_rate": 0.0001}, id="float_rate"),
         pytest.param({"daily_rate": Decimal("-0.0001")}, id="negative_rate"),
-        pytest.param({"settlement_date": WED}, id="settles_before_isd"),
-        pytest.param({"partials": (PartialSettlement(FRI, Decimal("0")),)}, id="zero_partial"),
+        pytest.param({"daily_rate": Decimal("NaN")}, id="nan_rate"),
+        pytest.param({"daily_rate": Decimal("Infinity")}, id="infinite_rate"),
+        pytest.param({"settlement_date": WED}, id="settles_before_intended_date"),
         pytest.param(
-            {"partials": (PartialSettlement(WED, Decimal("1")),)}, id="partial_before_isd"
+            {"partials": (PartialSettlement(WED, Decimal("1")),)}, id="partial_before_intended"
         ),
         pytest.param(
             {"partials": (PartialSettlement(TUE, Decimal("1")),)}, id="partial_on_settlement"
         ),
         pytest.param({"partials": (PartialSettlement(FRI, AMOUNT),)}, id="partial_covers_all"),
+        pytest.param(
+            {
+                "partials": (
+                    PartialSettlement(FRI, Decimal("600000")),
+                    PartialSettlement(MON, Decimal("600000")),
+                )
+            },
+            id="partials_exceed_amount",
+        ),
     ],
 )
 def test_invalid_input_raises(overrides: dict[str, object]) -> None:

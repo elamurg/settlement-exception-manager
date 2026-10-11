@@ -22,12 +22,25 @@ class AssetClass(StrEnum):
     CORPORATE_BONDS = "CORPORATE_BONDS"
 
 
+def _require_finite_decimal(field_name: str, value: object) -> None:
+    """This refejcts floats, ints, NaN and infinity."""
+    if not isinstance(value, Decimal) or not value.is_finite():
+        raise InvalidPenaltyInput(f"{field_name} must be finiite.")
+
+
 @dataclass(frozen=True, slots=True)
 class PartialSettlement:
     """Only part of the failed amount is settled on a given day."""
 
     settled_on: date
     amount: Decimal
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.settled_on, date):
+            raise InvalidPenaltyInput("Partial settled_on must be a date.")
+        _require_finite_decimal("Partial amount", self.amount)
+        if self.amount <= 0:
+            raise InvalidPenaltyInput("Amount must be a positive number.")
 
 
 def is_business_day(day: date, holidays: frozenset[date]) -> bool:
@@ -76,20 +89,21 @@ def accrue_penalty(
     """Total penalty for a fail, rounded per day"""
     # reduse immposible imput
     # using isinstance() to check if a value is type x
-    if not isinstance(failed_amount, Decimal) or failed_amount <= 0:
-        raise InvalidPenaltyInput("Failed amount has to be a positive decimal number.")
-    if not isinstance(daily_rate, Decimal) or daily_rate < 0:
-        raise InvalidPenaltyInput("Daily rate has to be a decimal number larger than zero.")
+    _require_finite_decimal("Failed amount", failed_amount)
+    if failed_amount <= 0:
+        raise InvalidPenaltyInput("Failed amount must be positive.")
+    _require_finite_decimal("Daily rate", daily_rate)
+    if daily_rate < 0:
+        raise InvalidPenaltyInput("Daily rate must not be negative.")
     if settlement_date < intended_settlement_date:
         raise InvalidPenaltyInput(
             "Settlement date cannot come before the intended settlement date."
         )
     for partial in partials:
-        if partial.amount == 0:
-            raise InvalidPenaltyInput("Partial amount cannot be zero.")
-        if partial.settled_on < intended_settlement_date or partial.settled_on >= settlement_date:
+        if not intended_settlement_date <= partial.settled_on < settlement_date:
             raise InvalidPenaltyInput(
-                "Partial settlement cannot come before the intended settlement date."
+                "Partial must settle on or after the intended settlement date "
+                "and before the settlement date."
             )
     if sum(partial.amount for partial in partials) >= failed_amount:
         raise InvalidPenaltyInput("Sum of partials cannot be larger than failed amount.")
