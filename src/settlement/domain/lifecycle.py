@@ -2,13 +2,16 @@
 Every transition returns an AuditEvent.
 
 The lifecycle:
-booked -> allocated -> confirmed -> affirmed -> instructed ->
+booked -> allocated -> confirmed -> affirmed -> instructed -> matched/failed
+matched -> settled/partially_settled/failed
+partially_settled -> settled/failed
+failed -> resolved/cancelled
 
--> matched -> settled/partially_settled/failed
--> partially_settled -> settled/failed
--> failed -> resolved/cancelled
+Booked, allocated, confirmed and affirmed trades can also be cancelled
+(booked in error). From instructed onwards, a trade can only end via the fail path.
 
-END PHASES: Settled, Resolved, Cancelled"""
+End states: settled, resolved, cancelled.
+"""
 
 from dataclasses import replace
 from datetime import datetime
@@ -27,6 +30,10 @@ _ALLOWED: dict[TradeStatus, frozenset[TradeStatus]] = {
     ),
     TradeStatus.PARTIALLY_SETTLED: frozenset({TradeStatus.SETTLED, TradeStatus.FAILED}),
     TradeStatus.FAILED: frozenset({TradeStatus.RESOLVED, TradeStatus.CANCELLED}),
+    TradeStatus.BOOKED: frozenset({TradeStatus.ALLOCATED, TradeStatus.CANCELLED}),
+    TradeStatus.ALLOCATED: frozenset({TradeStatus.CONFIRMED, TradeStatus.CANCELLED}),
+    TradeStatus.CONFIRMED: frozenset({TradeStatus.AFFIRMED, TradeStatus.CANCELLED}),
+    TradeStatus.AFFIRMED: frozenset({TradeStatus.INSTRUCTED, TradeStatus.CANCELLED}),
     TradeStatus.SETTLED: frozenset(),
     TradeStatus.CANCELLED: frozenset(),
     TradeStatus.RESOLVED: frozenset(),
