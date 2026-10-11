@@ -27,6 +27,10 @@ LEGAL: set[tuple[TradeStatus, TradeStatus]] = {
     (S.MATCHED, S.FAILED),
     (S.PARTIALLY_SETTLED, S.SETTLED),
     (S.PARTIALLY_SETTLED, S.FAILED),
+    (S.BOOKED, S.CANCELLED),
+    (S.ALLOCATED, S.CANCELLED),
+    (S.CONFIRMED, S.CANCELLED),
+    (S.AFFIRMED, S.CANCELLED),
     (S.FAILED, S.RESOLVED),
     (S.FAILED, S.CANCELLED),
 }
@@ -55,7 +59,7 @@ def make_trade(status: TradeStatus = S.BOOKED) -> Trade:
 # the thing after the @ means that it loops the same test several times, once for each value
 # in the list (LEGAL or ILLEGAL) -> like recursion basically
 @pytest.mark.parametrize(("current", "target"), sorted(LEGAL))
-def test_legal_transaction_succeeds(current: TradeStatus, target: TradeStatus) -> None:
+def test_legal_transition_succeeds(current: TradeStatus, target: TradeStatus) -> None:
     """Every allowed move works"""
     new_trade, event = transition(
         make_trade(current), target, actor="barclays", at=NOW, event_id="E1"
@@ -66,13 +70,13 @@ def test_legal_transaction_succeeds(current: TradeStatus, target: TradeStatus) -
 
 
 @pytest.mark.parametrize(("current", "target"), ILLEGAL)
-def test_illegal_transaction_failed(current: TradeStatus, target: TradeStatus) -> None:
+def test_illegal_transition_failed(current: TradeStatus, target: TradeStatus) -> None:
     """Every forbidden move is refused."""
     with pytest.raises(IllegalTransition):
         transition(make_trade(current), target, actor="Barclays", at=NOW, event_id="E2")
 
 
-@pytest.mark.parametrize(("current", "target"), sorted(LEGAL))
+@pytest.mark.parametrize(("current", "target"), list(product(S, S)))
 def test_can_transition_matches_table(current: TradeStatus, target: TradeStatus) -> None:
     assert can_transition(current, target) == ((current, target) in LEGAL)
 
@@ -124,7 +128,7 @@ def test_failed_path_to_resolved() -> None:
     assert trade.status == S.RESOLVED
 
 
-# i did not write this test nor do i understand it past the regex function
+# only lifecycle.py may change a trade's status
 def test_status_only_changed_in_lifecycle() -> None:
     """No module except lifecycle.py can change a status via dataclasses"""
     src = Path(__file__).parent.parent / "src"
@@ -135,3 +139,8 @@ def test_status_only_changed_in_lifecycle() -> None:
         if path.name != "lifecycle.py" and pattern.search(path.read_text())
     ]
     assert offenders == []
+
+
+def test_cannot_cancel_after_instruction() -> None:
+    with pytest.raises(IllegalTransition):
+        transition(make_trade(S.INSTRUCTED), S.CANCELLED, actor="ela", at=NOW, event_id="E1")
