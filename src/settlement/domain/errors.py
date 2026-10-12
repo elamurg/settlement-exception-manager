@@ -19,3 +19,7 @@ class IllegalTransition(DomainError):
 
 class InvalidPenaltyInput(DomainError):
     """Raised when penalty inputs are impossible (negative amount, dates out of order...)."""
+
+
+class InvalidMatchInput(DomainError):
+    """Raised when matching input is unusable (like when a trade appears twice)"""
