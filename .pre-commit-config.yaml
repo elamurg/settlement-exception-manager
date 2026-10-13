@@ -28,3 +28,5 @@ repos:
         - redis
         - pymongo
         - pytest
+        - pyyaml
+        - types-pyyaml
