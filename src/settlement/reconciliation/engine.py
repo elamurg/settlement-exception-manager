@@ -38,7 +38,9 @@ def reconcile(
 
     broken_trade_ids = {brk.ours.trade_id for brk in fuzzy.breaks if brk.ours}
     clean = tuple(
-        match for match in match_result.matched if match.trade.trade_id not in broken_trade_ids
+        result
+        for result in tolerance_results
+        if result.match.trade.trade_id not in broken_trade_ids
     )
 
     return ReconciliationReport(

@@ -87,7 +87,7 @@ def trade_ids_everywhere(report: ReconciliationReport) -> list[str]:
     unresolved group. Duplicates in this list mean a trade was counted in two places.
     """
     return [
-        *(match.trade.trade_id for match in report.clean),
+        *(result.match.trade.trade_id for result in report.clean),
         *(brk.ours.trade_id for brk in report.breaks if brk.ours is not None),
         *(trade.trade_id for trade in report.unresolved_trades),
         *(trade.trade_id for group in report.unresolved_groups for trade in group.trades),
@@ -99,11 +99,24 @@ def test_matching_pair_is_clean() -> None:
 
     # The pair matches and is within tolerance, and the line reports no SSI details,
     # so it should be the only thing in the report:
-    assert [(match.trade.trade_id, match.line.line_id) for match in report.clean] == [("T1", "L1")]
+    assert [(r.match.trade.trade_id, r.match.line.line_id) for r in report.clean] == [("T1", "L1")]
     assert report.breaks == ()
     assert report.unresolved_trades == ()
     assert report.unresolved_lines == ()
     assert report.unresolved_groups == ()
+
+
+def test_clean_pair_keeps_the_difference_it_was_accepted_with() -> None:
+    # 3.00 off, within the 5.00 tolerance: clean, but the difference must not be lost.
+    line = make_line(consideration=Decimal("150253.00"))
+
+    report = reconcile([make_entry()], [line], TOLERANCES, raised_at=NOW)
+
+    (result,) = report.clean
+    assert result.difference == Decimal("3.00")
+    assert result.allowed == Decimal("5.00")
+    assert result.within is True
+    assert result.tolerance_set_version == "test-v1"
 
 
 def test_outside_tolerance_is_a_break_and_not_clean() -> None:
