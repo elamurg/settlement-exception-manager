@@ -1,5 +1,6 @@
 """Load a version tolerance set from YAML into ToleranceSet"""
 
+from collections.abc import Hashable
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
@@ -13,6 +14,27 @@ from settlement.reconciliation.errors import ToleranceError
 
 _TOP_LEVEL_KEYS = {"version", "effective_from", "rules"}
 _RULE_KEYS = {"currency", "instrument_type", "absolute", "percentage"}
+
+
+class _UniqueKeyLoader(yaml.SafeLoader):
+    """yaml.safe_load, except a key that appears twice in one mapping is an error."""
+
+
+def _construct_unique_mapping(loader: _UniqueKeyLoader, node: yaml.MappingNode) -> dict[Any, Any]:
+    seen: set[Hashable] = set()
+    for key_node, _ in node.value:
+        key = loader.construct_object(key_node)
+        if isinstance(key, Hashable) and key in seen:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate key {key!r}", key_node.start_mark
+            )
+        seen.add(key)
+    return loader.construct_mapping(node)
+
+
+_UniqueKeyLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
+)
 
 
 def load_tolerance_set(path: Path) -> ToleranceSet:
@@ -29,6 +51,7 @@ def parse_tolerance_set(text: str, source: str = "tolerances.yaml") -> Tolerance
     try:
         # safeload only ever produces plain data
         data = yaml.safe_load(text)
+        data = yaml.load(text, Loader=_UniqueKeyLoader)
     except yaml.YAMLError as e:
         raise ToleranceError(source, f"Not a valid YAML: {e}") from None
 
