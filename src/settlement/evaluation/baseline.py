@@ -96,7 +96,7 @@ def score(
     for brk in report.breaks:
         if brk.ours is not None:
             break_types_by_trade[brk.ours.trade_id].add(brk.break_type)
-    clean_in_report = {match.trade.trade_id for match in report.clean}
+    clean_in_report = {result.match.trade.trade_id for result in report.clean}
     unresolved_ids = {trade.trade_id for trade in report.unresolved_trades} | {
         trade.trade_id for group in report.unresolved_groups for trade in group.trades
     }
@@ -152,8 +152,9 @@ def format_table(scores: Scores, config: GenerationConfig, tolerance_set_version
         f"tolerance set {tolerance_set_version}",
         "",
         "| Metric | Value |",
-        "|----------------|",
-        f"| Match rate | {scores.match_rate:.2%}({scores.matched_clean} / {scores.clean_trades}) |",
+        "|---|---|",
+        f"| Match rate | {scores.match_rate:.2%} "
+        f"({scores.matched_clean} / {scores.clean_trades}) |",
         f"| False break rate | {scores.false_break_rate:.2%} "
         f"({scores.false_breaks} / {scores.clean_trades}) |",
         f"| Clean trades left unresolved | {scores.unresolved_clean} |",
@@ -163,7 +164,7 @@ def format_table(scores: Scores, config: GenerationConfig, tolerance_set_version
         f"| Missed | {scores.missed} |",
         "",
         "| Break type | Injected | Found | Wrong type | Missed |",
-        "|-----------------------------------------------------|",
+        "|---|---|---|---|---|",
     ]
     for break_type in BreakType:  # enum order, so the table is the same every run
         type_score = scores.by_type.get(break_type)

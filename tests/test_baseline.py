@@ -22,6 +22,7 @@ from settlement.domain.tolerance import ToleranceRule, ToleranceSet
 from settlement.evaluation.baseline import (
     Scores,
     TypeScore,
+    format_table,
     main,
     run_baseline,
     score,
@@ -288,6 +289,26 @@ def test_baseline_counts_add_up() -> None:
 def test_same_seed_gives_the_same_scores() -> None:
     # This is what makes it a baseline: anyone can re-run it and get identical numbers.
     assert run_baseline(SMALL_RUN, V1_TOLERANCES) == run_baseline(SMALL_RUN, V1_TOLERANCES)
+
+
+def test_table_separators_match_their_headers() -> None:
+    # A markdown separator row needs one cell per column, or the table renders as plain text.
+    scores = run_baseline(SMALL_RUN, V1_TOLERANCES)
+    lines = format_table(scores, SMALL_RUN, "v1").splitlines()
+
+    separators = [index for index, line in enumerate(lines) if line.startswith("|-")]
+    assert len(separators) == 2  # one for each table
+    for index in separators:
+        header = lines[index - 1]
+        assert lines[index].count("|") == header.count("|"), f"bad separator under: {header}"
+
+
+def test_rate_and_count_are_separated_by_a_space() -> None:
+    scores = run_baseline(SMALL_RUN, V1_TOLERANCES)
+
+    table = format_table(scores, SMALL_RUN, "v1")
+
+    assert "%(" not in table  # e.g. "99.51% (4460 / 4482)", never "99.51%(4460"
 
 
 def test_main_prints_the_table(capsys: pytest.CaptureFixture[str]) -> None:
