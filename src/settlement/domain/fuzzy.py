@@ -1,16 +1,16 @@
-"""Fuzzy pass: turn the exact matching and tolerance checks left
-over into typed breaks. A near match must be unique in both directions and
-anything that can't be decided goes to 'unresolved' for a human check."""
+"""Fuzzy pass: turn what exact matching and tolerance checks left over into typed breaks.
 
-# abc. = abstract base classes
-# Sequence = an ordered collecntion I can loop over
-# Mapping = something i can look things up in by key
+A near match must be unique in both directions, and anything that can't be decided goes
+to 'unresolved' for a human to check. Nothing is guessed.
+"""
+
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, fields
 from datetime import datetime
 
 from settlement.domain.errors import InvalidMatchInput, InvalidModel
+from settlement.domain.identifiers import ISIN
 from settlement.domain.matching import (
     AmbiguousGroup,
     EconomicKey,
@@ -24,13 +24,15 @@ from settlement.domain.models import (
     Break,
     BreakType,
     FieldDifference,
+    Side,
     StatementLine,
     Trade,
     require_text,
 )
 from settlement.domain.tolerance import ToleranceResult
 
-# dif ISIN or dif side is dif trade
+# Key fields where a single difference still means "the same trade, with one thing wrong".
+# ISIN and side are left out on purpose: a different ISIN or side is a different trade.
 NEAR_MATCH_FIELDS: Mapping[str, BreakType] = {
     "quantity": BreakType.QUANTITY_BREAK,
     "intended_settlement_date": BreakType.DATE_MISMATCH,
@@ -66,7 +68,10 @@ def find_breaks(
     *,
     raised_at: datetime,
 ) -> FuzzyResult:
-    """Raise a typed break for everything that has one clear cause, leave the rest unresolved."""
+    """Raise a typed break for everything that has one clear cause; leave the rest unresolved.
+
+    `tolerance_results` must hold exactly one result per matched pair in `match_result`.
+    """
     checked = [result.match for result in tolerance_results]
     if sorted(checked, key=_match_id) != sorted(match_result.matched, key=_match_id):
         raise InvalidMatchInput("Tolerance results must cover exactly the matched pairs.")
@@ -74,8 +79,6 @@ def find_breaks(
         match_result.unmatched_trades, match_result.unmatched_lines, raised_at
     )
     duplicates, unresolved_groups = _duplicate_breaks(match_result.ambiguous, raised_at)
-    # the * in front of each list unpacks it into a new one
-    # needed to make a flay list of break objects
     breaks = [
         *_price_breaks(tolerance_results, raised_at),
         *_ssi_breaks(tolerance_results, settlement_details, raised_at),
@@ -94,7 +97,7 @@ def _price_breaks(
     tolerance_results: Sequence[ToleranceResult],
     raised_at: datetime,
 ) -> list[Break]:
-    """A PRICE_BREAK for every matched pair outsife tolerance"""
+    """A PRICE_BREAK for every matched pair outside tolerance."""
     breaks: list[Break] = []
     for result in tolerance_results:
         if result.within:
@@ -117,12 +120,22 @@ def _ssi_breaks(
     settlement_details: Mapping[str, SettlementDetails],
     raised_at: datetime,
 ) -> list[Break]:
-    """An SSI_MISMATCH where the custodian settled against details that differ from ours."""
+    """Check each matched pair's settlement details against our SSI on file.
+
+    No SSI on file is itself a static data problem (we couldn't have instructed correctly),
+    so it raises a STATIC_DATA break. Otherwise, an SSI_MISMATCH where the custodian settled
+    against details that differ from ours. Details the custodian doesn't report (None) are
+    not compared.
+    """
     breaks: list[Break] = []
     for result in tolerance_results:
         trade, line = result.match.trade, result.match.line
         on_file = settlement_details.get(trade.trade_id)
         if on_file is None:
+            no_ssi = FieldDifference(
+                "ssi_on_file", ours="missing", theirs=line.counterparty_bic or "not reported"
+            )
+            breaks.append(_make_break(BreakType.STATIC_DATA, trade, line, (no_ssi,), raised_at))
             continue
 
         evidence: list[FieldDifference] = []
@@ -148,14 +161,27 @@ def _near_match_breaks(
     lines: Sequence[StatementLine],
     raised_at: datetime,
 ) -> tuple[list[Break], list[Trade], list[StatementLine]]:
-    """Pair unmatched trades and lines that differ in exactly one near-match field."""
+    """Pair unmatched trades and lines that differ in exactly one near-match field.
+
+    A pair counts only if it's unique both ways: the trade has one candidate line and that
+    line has one candidate trade. A trade with no candidate is an unmatched instruction,
+    unless a leftover line shares its ISIN, side and counterparty: that line is probably
+    ours with more than one field wrong, so the trade is left unresolved instead of being
+    reported as having no line. Everything else is left unresolved.
+    """
+    # Near matches share ISIN and side (neither is a near-match field), so only lines with
+    # the same ISIN and side need comparing: thousands of comparisons, not millions.
+    lines_by_isin_side: defaultdict[tuple[ISIN, Side], list[StatementLine]] = defaultdict(list)
+    for line in lines:
+        lines_by_isin_side[(line.isin, line.side)].append(line)
+
     candidates_for_trade: defaultdict[str, list[tuple[StatementLine, FieldDifference]]] = (
         defaultdict(list)
     )
     candidates_for_line: defaultdict[str, list[Trade]] = defaultdict(list)
 
     for trade in trades:
-        for line in lines:
+        for line in lines_by_isin_side.get((trade.isin, trade.side), []):
             differences = _differences(trade, line)
             if len(differences) == 1 and differences[0].field in NEAR_MATCH_FIELDS:
                 candidates_for_trade[trade.trade_id].append((line, differences[0]))
@@ -166,10 +192,13 @@ def _near_match_breaks(
     used_line_ids: set[str] = set()
     for trade in trades:
         candidates = candidates_for_trade.get(trade.trade_id, [])
-        if not candidates:
-            missing = FieldDifference("statement_line", ours="present", theirs="missing")
+        if not candidates and _has_similar_line(trade, lines_by_isin_side):
+            unresolved_trades.append(trade)
+        elif not candidates:
+            # "no matching line", not "missing": a line may exist with too many differences.
+            no_line = FieldDifference("statement_line", ours="present", theirs="no matching line")
             breaks.append(
-                _make_break(BreakType.UNMATCHED_INSTRUCTION, trade, None, (missing,), raised_at)
+                _make_break(BreakType.UNMATCHED_INSTRUCTION, trade, None, (no_line,), raised_at)
             )
         elif len(candidates) == 1 and len(candidates_for_line[candidates[0][0].line_id]) == 1:
             line, difference = candidates[0]
@@ -180,6 +209,17 @@ def _near_match_breaks(
             unresolved_trades.append(trade)
     unresolved_lines = [line for line in lines if line.line_id not in used_line_ids]
     return breaks, unresolved_trades, unresolved_lines
+
+
+def _has_similar_line(
+    trade: Trade,
+    lines_by_isin_side: Mapping[tuple[ISIN, Side], Sequence[StatementLine]],
+) -> bool:
+    """A leftover line with the trade's ISIN, side and counterparty: probably ours, mis-reported."""
+    return any(
+        line.counterparty_lei == trade.counterparty.lei
+        for line in lines_by_isin_side.get((trade.isin, trade.side), [])
+    )
 
 
 def _duplicate_breaks(
@@ -204,7 +244,7 @@ def _duplicate_breaks(
 
 
 def _differences(trade: Trade, line: StatementLine) -> list[FieldDifference]:
-    """Every economic key field where our tradde and their line disagree"""
+    """Every economic key field where our trade and their line disagree."""
     ours = key_of_trade(trade)
     theirs = key_of_line(line)
     differences: list[FieldDifference] = []
