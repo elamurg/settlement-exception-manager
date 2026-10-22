@@ -1,0 +1,17 @@
+#tolerance set v1. Never edit a released version: copy it to v2.yaml and change that.
+#Every value is quoted, so amounts are read as exact text, never as floats.
+version: "v1"
+effective_from: "2026-10-01"
+rules:
+  - currency: "EUR"
+    instrument_type: "*"
+    absolute: "5.00"
+    percentage: "0.0001"   # 0.01%
+  - currency: "GBP"
+    instrument_type: "*"
+    absolute: "5.00"
+    percentage: "0.0001"
+  - currency: "*"          # fallback: anything not listed above
+    instrument_type: "*"
+    absolute: "1.00"
+    percentage: "0"
