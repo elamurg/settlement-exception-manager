@@ -52,14 +52,14 @@ Owning a ticket means you build it. **It doesn't mean nobody else looks at it.**
 | Ticket | Owner | Notes |
 |---|---|---|
 | SE-16 Golden break set | Tina | Builds on the SE-07 manifest. |
-| SE-17 Metrics module | Ela | |
+| SE-17 Metrics module | Tina | |
 | SE-18 Evaluation runner and baseline | Tina | Needs SE-11 and SE-17. |
 
 ### Sprint 5: The agents
 
 | Ticket | Owner | Notes |
 |---|---|---|
-| SE-19 Agent base | Tina | Do this first. SE-20 to SE-22 build on it. |
+| SE-19 Agent base | Ela | Do this first. SE-20 to SE-22 build on it. |
 | SE-20 Break classifier | Ela | |
 | SE-21 Investigator | Tina | Pulls related records from storage. |
 | SE-22 Resolution drafter | Ela | |
