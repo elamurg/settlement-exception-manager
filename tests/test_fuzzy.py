@@ -76,10 +76,16 @@ def run(
     statement: list[StatementLine],
     details: dict[str, SettlementDetails] | None = None,
 ) -> FuzzyResult:
-    """The real pipeline: exact match, tolerance check, then the fuzzy pass."""
+    """The real pipeline: exact match, tolerance check, then the fuzzy pass.
+
+    Every trade has ON_FILE as its SSI unless `details` says otherwise, because a missing
+    SSI is itself a break.
+    """
+    if details is None:
+        details = {trade.trade_id: ON_FILE for trade in book}
     match_result = match_exact(book, statement)
     tolerance_results = [evaluate(match, TOLERANCES) for match in match_result.matched]
-    return find_breaks(match_result, tolerance_results, details or {}, raised_at=NOW)
+    return find_breaks(match_result, tolerance_results, details, raised_at=NOW)
 
 
 def found(result: FuzzyResult) -> list[tuple[str, str]]:
@@ -135,12 +141,25 @@ def test_isin_or_side_off_is_not_a_near_match(changes: dict[str, Any]) -> None:
     assert result.unresolved_trades == ()
 
 
-def test_two_fields_off_is_not_a_near_match() -> None:
+def test_two_fields_off_on_our_counterparty_is_unresolved() -> None:
+    # Same ISIN, side and counterparty, but quantity AND date differ: probably our line,
+    # mis-reported twice. Reporting "no matching line" would send ops chasing the custodian
+    # for an instruction that exists, so a human looks at both instead.
     line = make_line(quantity=Decimal("900"), intended_settlement_date=date(2026, 10, 12))
     result = run([make_trade()], [line])
 
+    assert found(result) == []
+    assert [trade.trade_id for trade in result.unresolved_trades] == ["T1"]
+    assert [line.line_id for line in result.unresolved_lines] == ["L1"]
+
+
+def test_two_fields_off_with_another_counterparty_is_unmatched() -> None:
+    # Quantity and counterparty both differ: not our counterparty's line, so the trade
+    # really has no matching line.
+    line = make_line(quantity=Decimal("900"), counterparty_lei=LEI_OTHER)
+    result = run([make_trade()], [line])
+
     assert found(result) == [("UNMATCHED_INSTRUCTION", "T1")]
-    assert result.unresolved_trades == ()
     assert [line.line_id for line in result.unresolved_lines] == ["L1"]
 
 
@@ -150,7 +169,9 @@ def test_trade_with_no_candidate_is_unmatched_instruction() -> None:
     assert found(result) == [("UNMATCHED_INSTRUCTION", "T1")]
     (brk,) = result.breaks
     assert brk.theirs is None
-    assert brk.evidence == (FieldDifference("statement_line", ours="present", theirs="missing"),)
+    assert brk.evidence == (
+        FieldDifference("statement_line", ours="present", theirs="no matching line"),
+    )
 
 
 def test_two_candidate_lines_leave_trade_unresolved() -> None:
@@ -231,10 +252,20 @@ def test_ssi_not_reported_by_custodian_raises_nothing() -> None:
     assert found(result) == []
 
 
-def test_ssi_not_on_file_raises_nothing() -> None:
-    # Thecustodian reports a BIC, but we hold no SSI for T1, so there's nothing to compare.
-    result = run([make_trade()], [make_line(counterparty_bic="BARCGB22")])
-    assert found(result) == []
+@pytest.mark.parametrize(
+    ("line_changes", "theirs"),
+    [
+        pytest.param({"counterparty_bic": "BARCGB22"}, "BARCGB22", id="custodian_reports_bic"),
+        pytest.param({}, "not reported", id="custodian_reports_nothing"),
+    ],
+)
+def test_no_ssi_on_file_is_static_data(line_changes: dict[str, Any], theirs: str) -> None:
+    # A missing SSI is a fail cause in itself: we couldn't have instructed correctly.
+    result = run([make_trade()], [make_line(**line_changes)], details={})
+
+    assert found(result) == [("STATIC_DATA", "T1")]
+    (brk,) = result.breaks
+    assert brk.evidence == (FieldDifference("ssi_on_file", ours="missing", theirs=theirs),)
 
 
 def test_duplicate_booking_flags_every_booking() -> None:
