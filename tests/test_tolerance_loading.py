@@ -98,6 +98,16 @@ def test_errors_from_a_file_name_that_file(tmp_path: Path) -> None:
         pytest.param("", "Expected mapping", id="empty_file"),
         pytest.param("- a\n- b\n", "Expected mapping", id="list_not_mapping"),
         pytest.param(
+            document(rule_yaml(extra='absolute: "500.00"'), FALLBACK_YAML),
+            "Not a valid YAML: duplicate key 'absolute'",
+            id="duplicate_key_in_rule",
+        ),
+        pytest.param(
+            document() + 'version: "v2"\n',
+            "Not a valid YAML: duplicate key 'version'",
+            id="duplicate_top_level_key",
+        ),
+        pytest.param(
             'version: "v1"\nrules: []\n', "top level: missing keys: effective_from", id="no_date"
         ),
         pytest.param(
