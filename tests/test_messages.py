@@ -6,7 +6,12 @@ from decimal import Decimal
 import pytest
 
 from settlement.ingestion.errors import ParseError
-from settlement.ingestion.messages import parse_swift_date, parse_swift_decimal, split_fields
+from settlement.ingestion.messages import (
+    check_sections,
+    parse_swift_date,
+    parse_swift_decimal,
+    split_fields,
+)
 
 # SWIFT decimals
 
@@ -121,3 +126,52 @@ def test_not_a_field_is_a_parse_error(line: str) -> None:
 def test_field_without_a_value_is_a_parse_error(line: str) -> None:
     with pytest.raises(ParseError, match="line 1, field '.*': has no value"):
         split_fields(line)
+
+
+# Sections (:16R: opens, :16S: closes)
+
+
+def test_nested_sections_are_fine() -> None:
+    text = """
+:16R:GENL
+:20C::SEME//INSTR-1
+:16S:GENL
+:16R:TRADDET
+:16R:FIAC
+:36B::SETT//UNIT/1000,
+:16S:FIAC
+:16S:TRADDET
+"""
+    check_sections(split_fields(text))  # no error means it passed
+
+
+def test_closed_but_never_opened() -> None:
+    fields = split_fields(":20C::SEME//INSTR-1\n:16S:GENL")
+
+    with pytest.raises(
+        ParseError, match="line 2, field '16S': closes GENL, which was never opened"
+    ):
+        check_sections(fields)
+
+
+def test_closed_in_the_wrong_order() -> None:
+    fields = split_fields(":16R:TRADDET\n:16R:FIAC\n:16S:TRADDET\n:16S:FIAC")
+
+    with pytest.raises(
+        ParseError, match=r"line 3, .*closes TRADDET, but FIAC \(opened on line 2\) is still open"
+    ):
+        check_sections(fields)
+
+
+def test_never_closed() -> None:
+    fields = split_fields(":16R:GENL\n:20C::SEME//INSTR-1")
+
+    with pytest.raises(ParseError, match="line 1, field '16R': GENL is never closed"):
+        check_sections(fields)
+
+
+def test_never_closed_points_at_the_innermost_section() -> None:
+    fields = split_fields(":16R:TRADDET\n:16R:FIAC\n:36B::SETT//UNIT/1000,")
+
+    with pytest.raises(ParseError, match="line 2, field '16R': FIAC is never closed"):
+        check_sections(fields)

@@ -70,3 +70,28 @@ def split_fields(text: str, source: str = "message") -> list[Field]:
             raise ParseError(source, number, "has no value", field=tag)
         fields.append(Field(number, tag, qualifier, value))
     return fields
+
+
+def check_sections(fields: list[Field], source: str = "message") -> None:
+    """Every :16R: (open) must be closed by a matching :16S: (close), innermost first."""
+    open_sections: list[Field] = []  # the stack of plates
+    for field in fields:
+        if field.tag == "16R":
+            open_sections.append(field)  # put this section on the stack
+        elif field.tag == "16S":
+            if not open_sections:
+                raise ParseError(
+                    source, field.line, f"closes {field.value}, which was never opened", "16S"
+                )
+            opened = open_sections.pop()  # take the top section off the stack
+            if opened.value != field.value:
+                raise ParseError(
+                    source,
+                    field.line,
+                    f"closes {field.value}, but {opened.value} (opened on line {opened.line}) "
+                    "is still open",
+                    "16S",
+                )
+    if open_sections:
+        last = open_sections[-1]
+        raise ParseError(source, last.line, f"{last.value} is never closed", "16R")
