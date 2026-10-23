@@ -181,16 +181,23 @@ def _parse_instruction(text: str, side: Side, source: str) -> InstructionMessage
 
 def _one(fields: list[Field], tag: str, qualifier: str | None, source: str) -> Field:
     """The one field with this tag and qualifier. Missing or repeated is an error."""
-    label = _label_for(tag, qualifier)
-    matches = [field for field in fields if field.tag == tag and field.qualifier == qualifier]
-    if not matches:
+    field = _at_most_one(fields, tag, qualifier, source)
+    if field is None:
+        label = _label_for(tag, qualifier)
         raise ParseError(source, fields[-1].line, f"message ends without {label}", label)
+    return field
+
+
+def _at_most_one(fields: list[Field], tag: str, qualifier: str | None, source: str) -> Field | None:
+    """The field with this tag and qualifier, or None if it's absent. Repeated is an error."""
+    matches = [field for field in fields if field.tag == tag and field.qualifier == qualifier]
     if len(matches) > 1:
+        label = _label_for(tag, qualifier)
         lines = " and ".join(str(field.line) for field in matches)
         raise ParseError(
             source, matches[1].line, f"{label} appears more than once (lines {lines})", label
         )
-    return matches[0]
+    return matches[0] if matches else None
 
 
 def _convert[T](field: Field, convert: Callable[[str], T], source: str) -> T:
@@ -236,3 +243,65 @@ def _parse_amount(value: str) -> tuple[str, Decimal]:
     if amount <= 0:
         raise ValueError(f"amount must be more than zero, got {value!r}")
     return match["currency"], amount
+
+
+# MT548: status of an instruction
+
+
+@dataclass(frozen=True, slots=True)
+class StatusMessage:
+    """MT548: the custodian telling us whether one of our instructions matched at the CSD."""
+
+    reference: str  # :20C::SEME//  the custodian's reference for this status message
+    related_reference: str  # :20C::RELA//  our instruction's reference (its SEME)
+    matched: bool  # :25D::MTCH//  MACH (matched) or NMAT (not matched)
+    reason: str | None  # :24B::NMAT//  why it didn't match, e.g. DQUA; None when matched
+
+
+MATCHING_STATUSES = {"MACH", "NMAT"}
+
+# A reason code: 4 capital letters or digits. E.g. "DQUA" (quantities disagree)
+_REASON = re.compile(r"[A-Z0-9]{4}")
+
+
+def parse_mt548(text: str, source: str = "MT548") -> StatusMessage:
+    fields = split_fields(text, source)
+    if not fields:
+        raise ParseError(source, 1, "message is empty")
+    check_sections(fields, source)
+
+    function = _one(fields, "23G", None, source)
+    if function.value != "INST":
+        raise ParseError(source, function.line, f"must be INST, got {function.value!r}", ":23G:")
+
+    status = _one(fields, "25D", "MTCH", source)
+    if status.value not in MATCHING_STATUSES:
+        raise ParseError(
+            source, status.line, f"must be MACH or NMAT, got {status.value!r}", _label(status)
+        )
+    matched = status.value == "MACH"
+
+    # A reason only makes sense when it didn't match, and then it's required.
+    reason = _at_most_one(fields, "24B", "NMAT", source)
+    if matched and reason is not None:
+        raise ParseError(
+            source, reason.line, "a matched instruction can't have a reason", _label(reason)
+        )
+    if not matched and reason is None:
+        raise ParseError(
+            source, status.line, "not matched, but no reason given (:24B::NMAT)", _label(status)
+        )
+    if reason is not None and not _REASON.fullmatch(reason.value):
+        raise ParseError(
+            source,
+            reason.line,
+            f"reason must be a 4-letter code, got {reason.value!r}",
+            _label(reason),
+        )
+
+    return StatusMessage(
+        reference=_one(fields, "20C", "SEME", source).value,
+        related_reference=_one(fields, "20C", "RELA", source).value,
+        matched=matched,
+        reason=reason.value if reason else None,
+    )

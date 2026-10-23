@@ -10,9 +10,11 @@ from settlement.domain.models import Side
 from settlement.ingestion.errors import ParseError
 from settlement.ingestion.messages import (
     InstructionMessage,
+    StatusMessage,
     check_sections,
     parse_mt541,
     parse_mt543,
+    parse_mt548,
     parse_swift_date,
     parse_swift_decimal,
     split_fields,
@@ -306,3 +308,95 @@ def test_empty_message_is_rejected() -> None:
 def test_error_names_the_message_type() -> None:
     with pytest.raises(ParseError, match="^MT543 line 3, field ':23G:'"):
         parse_mt543(replace_line(":23G:NEWM", ":23G:XXXX"))
+
+
+# MT548 status
+
+MT548_NOT_MATCHED = """\
+:16R:GENL
+:20C::SEME//STAT-000456
+:23G:INST
+:16R:LINK
+:20C::RELA//INSTR-000123
+:16S:LINK
+:16R:STAT
+:25D::MTCH//NMAT
+:16R:REAS
+:24B::NMAT//DQUA
+:16S:REAS
+:16S:STAT
+:16S:GENL
+"""
+
+MT548_MATCHED = """\
+:16R:GENL
+:20C::SEME//STAT-000457
+:23G:INST
+:16R:LINK
+:20C::RELA//INSTR-000123
+:16S:LINK
+:16R:STAT
+:25D::MTCH//MACH
+:16S:STAT
+:16S:GENL
+"""
+
+
+def test_not_matched_with_reason() -> None:
+    assert parse_mt548(MT548_NOT_MATCHED) == StatusMessage(
+        reference="STAT-000456",
+        related_reference="INSTR-000123",
+        matched=False,
+        reason="DQUA",
+    )
+
+
+def test_matched_has_no_reason() -> None:
+    status = parse_mt548(MT548_MATCHED)
+
+    assert (status.matched, status.reason) == (True, None)
+
+
+def test_status_points_back_to_the_instruction() -> None:
+    """RELA in the MT548 is the SEME of the MT541 it's about."""
+    instruction = parse_mt541(MT541)
+
+    assert parse_mt548(MT548_NOT_MATCHED).related_reference == instruction.reference
+
+
+@pytest.mark.parametrize(
+    ("text", "line", "message"),
+    [
+        (MT548_MATCHED.replace(":23G:INST", ":23G:NEWM"), 3, "must be INST"),
+        (MT548_MATCHED.replace("MTCH//MACH", "MTCH//MAYB"), 8, "must be MACH or NMAT"),
+        (
+            MT548_NOT_MATCHED.replace(":16R:REAS\n:24B::NMAT//DQUA\n:16S:REAS\n", ""),
+            8,
+            "not matched, but no reason given",
+        ),
+        (
+            MT548_MATCHED.replace(":25D::MTCH//MACH", ":25D::MTCH//MACH\n:24B::NMAT//DQUA"),
+            9,
+            "a matched instruction can't have a reason",
+        ),
+        (MT548_NOT_MATCHED.replace("NMAT//DQUA", "NMAT//quantity"), 10, "4-letter code"),
+        (MT548_MATCHED.replace(":20C::RELA//INSTR-000123\n", ""), 9, "ends without :20C::RELA"),
+        (MT548_MATCHED.replace(":16S:LINK\n", ""), 9, "closes GENL, but LINK (opened on line 4)"),
+    ],
+    ids=[
+        "wrong_function",
+        "unknown_status",
+        "not_matched_without_reason",
+        "matched_with_reason",
+        "reason_not_a_code",
+        "no_link_to_instruction",
+        "broken_sections",
+    ],
+)
+def test_bad_mt548_names_the_line(text: str, line: int, message: str) -> None:
+    with pytest.raises(ParseError) as caught:
+        parse_mt548(text)
+
+    assert caught.value.line == line
+    assert str(caught.value).startswith(f"MT548 line {line}")
+    assert message in str(caught.value)
