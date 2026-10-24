@@ -1,12 +1,14 @@
 """Append-only audit store in MongoDB (SE-15): every event is written once and never changed."""
 
 from collections.abc import Mapping
+from datetime import datetime
 from typing import Any
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 
+from settlement.domain import history
 from settlement.domain.models import AuditEvent
 from settlement.storage.errors import AuditStoreError
 
@@ -37,6 +39,12 @@ class AuditStore:
         """Every event for one record, oldest first."""
         documents = self._events.find({"entity_type": entity_type, "entity_id": entity_id})
         return [_from_document(doc) for doc in documents.sort([("occurred_at", 1), ("_id", 1)])]
+
+    def state_as_of(
+        self, entity_type: str, entity_id: str, at: datetime
+    ) -> history.StateAsOf | None:
+        """What a record looked like at `at`, rebuilt from its events alone."""
+        return history.state_as_of(self.events_for(entity_type, entity_id), at)
 
 
 def _to_document(event: AuditEvent) -> dict[str, Any]:

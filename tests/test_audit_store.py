@@ -146,7 +146,7 @@ def test_the_store_has_no_way_to_change_or_remove_events() -> None:
     """Level 1 of append-only: our own code can't do it. (Level 2, the database, is SE-15b.)"""
     methods = {name for name in dir(AuditStore) if not name.startswith("_")}
 
-    assert methods == {"connect", "append", "events_for"}
+    assert methods == {"connect", "append", "events_for", "state_as_of"}  # no update, no delete
 
 
 def replace_actor(original: AuditEvent, actor: str) -> AuditEvent:
