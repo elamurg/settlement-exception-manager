@@ -45,7 +45,13 @@ def band_for(
     holidays: frozenset[date],
     critical_window: timedelta = DEFAULT_CRITICAL_WINDOW,
 ) -> Band:
-    """How urgent a break is, from how close its deadline is."""
+    """How urgent a break is, from how close its deadline is.
+
+    Deadlines are in UTC, so `now` is converted to UTC before comparing dates: the same
+    moment must give the same band, whatever timezone the caller's clock is in.
+    """
+    require_aware("now", now)
+    now = now.astimezone(UTC)
     if deadline <= now:
         return Band.OVERDUE
     time_left = deadline - now
@@ -90,6 +96,7 @@ def prioritise(
 ) -> list[PrioritisedBreak]:
     """Every break in the order to work on it (urgent first)"""
     require_aware("now", now)
+    now = now.astimezone(UTC)  # deadlines are UTC: compare dates in the same timezone
     items: list[PrioritisedBreak] = []
     for brk in breaks:
         deadline = deadline_for(brk.intended_settlement_date, cutoff)

@@ -1,7 +1,7 @@
 """Tests for settlement.domain.ageing: which break to fix first."""
 
 from dataclasses import replace
-from datetime import UTC, date, datetime, time
+from datetime import UTC, date, datetime, time, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -119,6 +119,36 @@ def test_deadline_is_the_cutoff_on_the_settlement_date() -> None:
 )
 def test_band(now: datetime, settles: date, expected: Band) -> None:
     assert band_for(deadline_for(settles), now, NO_HOLIDAYS) == expected
+
+
+@pytest.mark.parametrize("hours", [2, -5, 9, 14, -12])
+def test_same_moment_in_another_timezone_gives_the_same_band(hours: int) -> None:
+    # Monday 23:30 UTC is already Tuesday in Paris (+02:00) and Tokyo (+09:00), and still
+    # Monday in New York (-05:00). Deadlines are UTC, so the band must not depend on that.
+    deadline = deadline_for(TUE)
+    utc = at(MON, 23, 30)
+    elsewhere = utc.astimezone(timezone(timedelta(hours=hours)))
+
+    assert band_for(deadline, elsewhere, NO_HOLIDAYS) == band_for(deadline, utc, NO_HOLIDAYS)
+    assert band_for(deadline, utc, NO_HOLIDAYS) == Band.NEXT_DAY
+
+
+def test_prioritise_gives_the_same_queue_in_any_timezone() -> None:
+    breaks = [make_break("B1", settles=TUE), make_break("B2", settles=WED)]
+    utc = at(MON, 23, 30)
+    paris = utc.astimezone(timezone(timedelta(hours=2)))
+
+    in_utc = prioritise(breaks, now=utc, holidays=NO_HOLIDAYS, daily_rate=RATE)
+    in_paris = prioritise(breaks, now=paris, holidays=NO_HOLIDAYS, daily_rate=RATE)
+
+    assert [(i.brk.break_id, i.band, i.business_days_left) for i in in_paris] == [
+        (i.brk.break_id, i.band, i.business_days_left) for i in in_utc
+    ]
+
+
+def test_band_for_rejects_now_without_a_timezone() -> None:
+    with pytest.raises(InvalidModel):
+        band_for(deadline_for(TUE), datetime(2026, 10, 12, 23, 30), NO_HOLIDAYS)
 
 
 def test_holiday_does_not_count_as_a_day_away() -> None:
