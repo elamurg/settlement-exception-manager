@@ -7,6 +7,12 @@ of injected breaks can serve as ground truth for evaluation (SE-11, SE-16).
 Every trade on the book has, by default, one statement line that agrees with it on every
 economic field. An injected break changes exactly one thing about that pairing, and the
 manifest records what changed.
+
+The CSD's view (SE-12): every instruction the custodian received gets a matching status, as
+an MT548 would report it. Breaks between book and custodian match at the CSD, so they sit on
+our side (leg 1). Separately, some clean trades get a counterparty break: book and custodian
+agree, but the CSD reports no match (leg 2). Those use their own random stream, so adding
+them never changes the book or statement a seed produces.
 """
 
 import math
@@ -17,6 +23,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
 
+from settlement.domain.attribution import REASON_BREAK_TYPES, CsdStatus, Leg
 from settlement.domain.models import (
     SSI,
     BreakType,
@@ -63,6 +70,15 @@ DEFAULT_BREAK_RATES: Mapping[BreakType, float] = MappingProxyType(
     }
 )
 
+# Share of otherwise clean trades where the counterparty disagrees at the CSD (leg 2).
+DEFAULT_COUNTERPARTY_BREAK_RATE = 0.03
+
+# MT548 reason codes for those, weighted: a counterparty that never instructed (CMIS) is the
+# most common cause in practice.
+COUNTERPARTY_REASON_WEIGHTS: Mapping[str, float] = MappingProxyType(
+    {"CMIS": 0.4, "DQUA": 0.15, "DDAT": 0.15, "DMON": 0.15, "DEPT": 0.15}
+)
+
 DEFAULT_TRADE_DATE = date(2026, 10, 5)
 FOP_SHARE = 0.05
 INSTRUMENT_COUNT = 40
@@ -78,10 +94,15 @@ class GenerationConfig:
     seed: int
     trade_date: date = DEFAULT_TRADE_DATE
     break_rates: Mapping[BreakType, float] = field(default=DEFAULT_BREAK_RATES)
+    counterparty_break_rate: float = DEFAULT_COUNTERPARTY_BREAK_RATE
 
     def __post_init__(self) -> None:
         if self.trades < 1:
             raise ValueError("trades must be at least 1")
+        if not math.isfinite(self.counterparty_break_rate) or not (
+            0 <= self.counterparty_break_rate <= 1
+        ):
+            raise ValueError("counterparty break rate must be a finite number from 0 to 1")
         for break_type, rate in self.break_rates.items():
             if break_type not in INJECTABLE:
                 raise ValueError(f"{break_type} can't be injected into a book and statement")
@@ -101,6 +122,18 @@ class InjectedBreak:
     statement_line_id: str | None  # None when the custodian has no line for the trade
     evidence: tuple[FieldDifference, ...]
     related_trade_ids: tuple[str, ...] = ()  # the second booking, for duplicates
+    # Book vs custodian breaks still match at the CSD, so the problem is on our side.
+    leg: Leg = Leg.INTERNAL
+
+
+@dataclass(frozen=True, slots=True)
+class CounterpartyBreak:
+    """A break only the CSD can see: book and custodian agree, the counterparty doesn't."""
+
+    break_type: BreakType
+    trade_id: str
+    reason: str  # the MT548 reason code, e.g. "DQUA"
+    leg: Leg = Leg.COUNTERPARTY
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +143,10 @@ class GeneratedData:
     statement: tuple[StatementLine, ...]
     breaks: tuple[InjectedBreak, ...]
     ssis: tuple[SSI, ...]  # the settlement instructions on file, one per party and currency
+    # The CSD's view: one status per statement line, in statement order (SE-12).
+    statuses: tuple[CsdStatus, ...] = ()
+    # Leg-2 breaks, kept apart from `breaks` so book vs statement scoring is unchanged.
+    counterparty_breaks: tuple[CounterpartyBreak, ...] = ()
 
     def ssi_for(self, trade: Trade) -> SSI:
         return _ssi_lookup(self.ssis)[(trade.counterparty.party_id, trade.currency)]
@@ -298,6 +335,46 @@ def generate(config: GenerationConfig) -> GeneratedData:
         )
         for break_type, trade_id, evidence, related in pending
     )
+    statuses, counterparty_breaks = _csd_statuses(config, statement, breaks)
     return GeneratedData(
-        config=config, book=tuple(book), statement=statement, breaks=breaks, ssis=ssis
+        config=config,
+        book=tuple(book),
+        statement=statement,
+        breaks=breaks,
+        ssis=ssis,
+        statuses=statuses,
+        counterparty_breaks=counterparty_breaks,
     )
+
+
+def _csd_statuses(
+    config: GenerationConfig,
+    statement: tuple[StatementLine, ...],
+    breaks: tuple[InjectedBreak, ...],
+) -> tuple[tuple[CsdStatus, ...], tuple[CounterpartyBreak, ...]]:
+    """A matching status for every instruction the custodian received.
+
+    A trade with no statement line (an unmatched instruction) never reached the custodian,
+    so it gets no status. A trade that already has a book vs custodian break still matches
+    at the CSD, so each break sits on one leg only.
+    """
+    # Its own stream, so the book and statement for a seed stay exactly as they were.
+    rng = random.Random(f"{config.seed}/csd")
+    reasons = sorted(COUNTERPARTY_REASON_WEIGHTS)
+    weights = [COUNTERPARTY_REASON_WEIGHTS[reason] for reason in reasons]
+    leg_1_trades = {injected.trade_id for injected in breaks}
+
+    statuses: list[CsdStatus] = []
+    counterparty_breaks: list[CounterpartyBreak] = []
+    for line in statement:
+        trade_id = line.reference  # the custodian echoes our reference
+        if trade_id not in leg_1_trades and rng.random() < config.counterparty_break_rate:
+            reason = rng.choices(reasons, weights)[0]
+            statuses.append(CsdStatus(trade_id, matched=False, reason=reason))
+            counterparty_breaks.append(
+                CounterpartyBreak(REASON_BREAK_TYPES[reason], trade_id, reason)
+            )
+        else:
+            statuses.append(CsdStatus(trade_id, matched=True, reason=None))
+    counterparty_breaks.sort(key=lambda item: item.trade_id)
+    return tuple(statuses), tuple(counterparty_breaks)
