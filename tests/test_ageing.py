@@ -1,8 +1,4 @@
-"""Tests for settlement.domain.ageing: which break to fix first.
-
-Dates are a real week in October 2026: Friday 9th, the weekend, Monday 12th, Tuesday 13th.
-The default cut-off is 16:00 UTC and the default critical window is 4 hours.
-"""
+"""Tests for settlement.domain.ageing: which break to fix first."""
 
 from dataclasses import replace
 from datetime import UTC, date, datetime, time
@@ -93,9 +89,6 @@ def order(breaks: list[Break], now: datetime) -> list[str]:
     return [item.brk.break_id for item in ranked]
 
 
-# --- The ticket's "Done when" ------------------------------------------------------------
-
-
 def test_break_two_hours_from_deadline_outranks_bigger_break_two_days_out() -> None:
     # Friday 14:00: the small break's cut-off is in 2 hours; the big one settles Tuesday.
     small_but_urgent = make_break("URGENT", settles=FRI, consideration="1000.00")
@@ -104,15 +97,9 @@ def test_break_two_hours_from_deadline_outranks_bigger_break_two_days_out() -> N
     assert order([big_but_later, small_but_urgent], now=at(FRI, 14)) == ["URGENT", "BIG"]
 
 
-# --- deadline_for ------------------------------------------------------------------------
-
-
 def test_deadline_is_the_cutoff_on_the_settlement_date() -> None:
     assert deadline_for(FRI) == at(FRI, 16)
     assert deadline_for(FRI, time(12, 30)) == at(FRI, 12, 30)
-
-
-# --- band_for ----------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -140,9 +127,6 @@ def test_holiday_does_not_count_as_a_day_away() -> None:
     assert band_for(deadline_for(TUE), at(FRI, 9), frozenset({MON})) == Band.NEXT_DAY
 
 
-# --- daily_exposure ----------------------------------------------------------------------
-
-
 def test_exposure_is_consideration_times_rate_rounded_to_the_cent() -> None:
     # 150,250.00 x 0.0001 = 15.025, rounded half up to 15.03
     assert daily_exposure(make_break("B1", settles=FRI), RATE) == Decimal("15.03")
@@ -151,9 +135,6 @@ def test_exposure_is_consideration_times_rate_rounded_to_the_cent() -> None:
 def test_exposure_uses_their_line_when_there_is_no_trade() -> None:
     brk = replace(make_break("B1", settles=FRI), ours=None, theirs=BASE_LINE)
     assert daily_exposure(brk, RATE) == Decimal("15.03")
-
-
-# --- prioritise --------------------------------------------------------------------------
 
 
 def test_bands_come_in_order_of_urgency() -> None:
@@ -168,7 +149,7 @@ def test_bands_come_in_order_of_urgency() -> None:
 
 
 def test_within_a_band_less_time_left_beats_bigger_exposure() -> None:
-    # Both are LATER on Friday 09:00, but Tuesday's deadline comes first: time beats money.
+    # both are LATER on Friday 09:00, but Tuesday's deadline comes first: time beats money.
     small_tuesday = make_break("TUE", settles=TUE, consideration="1000.00")
     big_wednesday = make_break("WED", settles=WED, consideration="5000000.00")
 
@@ -176,7 +157,7 @@ def test_within_a_band_less_time_left_beats_bigger_exposure() -> None:
 
 
 def test_bigger_exposure_breaks_a_tie() -> None:
-    # Same deadline, same time left: the one that would cost more comes first.
+    # same deadline, same time left: the one that would cost more comes first.
     small = make_break("SMALL", settles=MON, consideration="1000.00")
     big = make_break("BIG", settles=MON, consideration="5000000.00")
 
