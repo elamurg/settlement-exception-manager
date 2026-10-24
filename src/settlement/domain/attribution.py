@@ -6,8 +6,10 @@ leg tells ops who to contact: fix our own booking, or chase the counterparty.
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
+from types import MappingProxyType
 
 from settlement.domain.errors import InvalidModel
 from settlement.domain.models import BreakType, require_text
@@ -69,13 +71,15 @@ def locate(book_custodian_break: bool, status: CsdStatus | None) -> Leg | None:
 
 # MT548 reason codes, as the break types we already use. Codes not listed here have no
 # equivalent yet; the caller should leave those for a human rather than guess.
-REASON_BREAK_TYPES: dict[str, BreakType] = {
-    "CMIS": BreakType.UNMATCHED_INSTRUCTION,  # counterparty's instruction is missing
-    "DQUA": BreakType.QUANTITY_BREAK,  # quantities disagree
-    "DDAT": BreakType.DATE_MISMATCH,  # settlement dates disagree
-    "DMON": BreakType.PRICE_BREAK,  # settlement amounts disagree
-    "DEPT": BreakType.SSI_MISMATCH,  # place of settlement / account disagrees
-}
+REASON_BREAK_TYPES: Mapping[str, BreakType] = MappingProxyType(
+    {
+        "CMIS": BreakType.UNMATCHED_INSTRUCTION,  # counterparty's instruction is missing
+        "DQUA": BreakType.QUANTITY_BREAK,  # quantities disagree
+        "DDAT": BreakType.DATE_MISMATCH,  # settlement dates disagree
+        "DMON": BreakType.PRICE_BREAK,  # settlement amounts disagree
+        "DEPT": BreakType.SSI_MISMATCH,  # place of settlement / account disagrees
+    }
+)
 
 
 def break_type_for_reason(reason: str) -> BreakType | None:

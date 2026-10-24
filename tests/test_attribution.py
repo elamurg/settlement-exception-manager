@@ -3,6 +3,7 @@
 import pytest
 
 from settlement.domain.attribution import (
+    REASON_BREAK_TYPES,
     CsdStatus,
     Leg,
     break_type_for_reason,
@@ -80,6 +81,16 @@ def test_valid_statuses() -> None:
             "4-letter code",
             id="reason_too_long",
         ),
+        pytest.param(
+            {"instruction_reference": "INSTR-1", "matched": False, "reason": "DQU"},
+            "4-letter code",
+            id="reason_one_too_short",
+        ),
+        pytest.param(
+            {"instruction_reference": "INSTR-1", "matched": False, "reason": "DQUAX"},
+            "4-letter code",
+            id="reason_one_too_long",
+        ),
     ],
 )
 def test_invalid_status(kwargs: dict[str, object], message: str) -> None:
@@ -102,6 +113,12 @@ def test_invalid_status(kwargs: dict[str, object], message: str) -> None:
 )
 def test_reason_codes_map_to_break_types(reason: str, expected: BreakType) -> None:
     assert break_type_for_reason(reason) == expected
+
+
+def test_reason_table_cannot_be_changed() -> None:
+    """Everything trusts this table, so an accidental edit must fail loudly."""
+    with pytest.raises(TypeError):
+        REASON_BREAK_TYPES["XXXX"] = BreakType.STATIC_DATA  # type: ignore[index]
 
 
 def test_unknown_reason_code_is_not_guessed() -> None:
