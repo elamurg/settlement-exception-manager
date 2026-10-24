@@ -231,8 +231,46 @@ def test_mt543_is_a_sell() -> None:
     assert parse_mt543(MT541).side == Side.SELL
 
 
-def test_cancellation_is_accepted() -> None:
-    assert parse_mt541(replace_line(":23G:NEWM", ":23G:CANC")).function == "CANC"
+# A cancellation: CANC, plus a LINK section saying which instruction it cancels.
+CANCELLATION = replace_line(
+    ":23G:NEWM", ":23G:CANC\n:16R:LINK\n:20C::PREV//INSTR-000100\n:16S:LINK"
+)
+
+
+def test_cancellation_records_what_it_cancels() -> None:
+    cancellation = parse_mt541(CANCELLATION)
+
+    assert (cancellation.function, cancellation.cancels) == ("CANC", "INSTR-000100")
+
+
+def test_new_instruction_cancels_nothing() -> None:
+    assert parse_mt541(MT541).cancels is None
+
+
+def test_cancellation_without_prev_is_rejected() -> None:
+    with pytest.raises(ParseError, match="line 3, field ':23G:': a cancellation needs :20C::PREV"):
+        parse_mt541(replace_line(":23G:NEWM", ":23G:CANC"))
+
+
+def test_new_instruction_with_prev_is_rejected() -> None:
+    text = replace_line(":23G:NEWM", ":23G:NEWM\n:16R:LINK\n:20C::PREV//INSTR-000100\n:16S:LINK")
+
+    with pytest.raises(ParseError, match=r"line 5, .*:20C::PREV.*can't cancel one"):
+        parse_mt541(text)
+
+
+def test_two_prev_references_are_rejected() -> None:
+    text = CANCELLATION.replace(
+        ":20C::PREV//INSTR-000100", ":20C::PREV//INSTR-000100\n:20C::PREV//INSTR-000101"
+    )
+
+    with pytest.raises(ParseError, match=":20C::PREV appears more than once"):
+        parse_mt541(text)
+
+
+def test_the_body_alone_doesnt_say_buy_or_sell() -> None:
+    """The type is in the SWIFT header, which isn't parsed: the caller's choice decides."""
+    assert (parse_mt541(MT541).side, parse_mt543(MT541).side) == (Side.BUY, Side.SELL)
 
 
 @pytest.mark.parametrize(

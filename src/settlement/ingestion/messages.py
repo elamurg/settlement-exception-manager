@@ -107,7 +107,12 @@ def check_sections(fields: list[Field], source: str = "message") -> None:
 @dataclass(frozen=True, slots=True)
 class InstructionMessage:
     """A settlement instruction: MT541 (receive against payment, so we buy) or MT543
-    (deliver against payment, so we sell)."""
+    (deliver against payment, so we sell).
+
+    The message type isn't in the body: in SWIFT it's in the application header (block 2),
+    which this simplified format leaves out. Whatever receives the message reads the header
+    and calls parse_mt541 or parse_mt543, so the side comes from that choice.
+    """
 
     reference: str  # :20C::SEME//  our reference for this instruction
     function: str  # :23G:  NEWM (new) or CANC (cancel)
@@ -119,6 +124,7 @@ class InstructionMessage:
     account: str  # :97A::SAFE//  our safekeeping account
     currency: str  # :19A::SETT//  the first 3 letters
     amount: Decimal  # :19A::SETT//  the rest
+    cancels: str | None = None  # :20C::PREV//  for CANC: the instruction it cancels
 
 
 FUNCTIONS = {"NEWM", "CANC"}
@@ -128,12 +134,14 @@ _AMOUNT = re.compile(r"(?P<currency>[A-Z]{3})(?P<number>[0-9]+,[0-9]*)")
 
 
 def parse_mt541(text: str, source: str = "MT541") -> InstructionMessage:
-    """MT541, receive against payment: we're buying."""
+    """MT541, receive against payment: we're buying. Call it for messages whose SWIFT
+    header says 541; the body alone doesn't say which type it is."""
     return _parse_instruction(text, Side.BUY, source)
 
 
 def parse_mt543(text: str, source: str = "MT543") -> InstructionMessage:
-    """MT543, deliver against payment: we're selling."""
+    """MT543, deliver against payment: we're selling. Call it for messages whose SWIFT
+    header says 543; the body alone doesn't say which type it is."""
     return _parse_instruction(text, Side.SELL, source)
 
 
@@ -150,6 +158,20 @@ def _parse_instruction(text: str, side: Side, source: str) -> InstructionMessage
     if function not in FUNCTIONS:
         raise ParseError(
             source, one("23G").line, f"must be NEWM or CANC, got {function!r}", ":23G:"
+        )
+
+    # A cancellation must say which instruction it cancels; a new instruction cancels nothing.
+    previous = _at_most_one(fields, "20C", "PREV", source)
+    if function == "CANC" and previous is None:
+        raise ParseError(
+            source,
+            one("23G").line,
+            "a cancellation needs :20C::PREV, the instruction it cancels",
+            ":23G:",
+        )
+    if function == "NEWM" and previous is not None:
+        raise ParseError(
+            source, previous.line, "a new instruction can't cancel one", _label(previous)
         )
 
     trade_date = _convert(one("98A", "TRAD"), parse_swift_date, source)
@@ -176,6 +198,7 @@ def _parse_instruction(text: str, side: Side, source: str) -> InstructionMessage
         account=one("97A", "SAFE").value,
         currency=currency,
         amount=amount,
+        cancels=previous.value if previous else None,
     )
 
 
