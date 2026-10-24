@@ -128,15 +128,21 @@ def test_failed_path_to_resolved() -> None:
     assert trade.status == S.RESOLVED
 
 
-# only lifecycle.py may change a trade's status
-def test_status_only_changed_in_lifecycle() -> None:
-    """No module except lifecycle.py can change a status via dataclasses"""
+# Each kind of status has exactly one module allowed to change it.
+STATUS_OWNERS = {
+    "lifecycle.py",  # a trade's status (SE-05)
+    "controls.py",  # a resolution's status, under maker-checker (SE-14)
+}
+
+
+def test_status_only_changed_by_its_owner() -> None:
+    """Only the owning modules may change a status via dataclasses.replace."""
     src = Path(__file__).parent.parent / "src"
     pattern = re.compile(r"replace\([^)]*\bstatus\s*=")
     offenders = [
         path.name
         for path in src.rglob("*.py")
-        if path.name != "lifecycle.py" and pattern.search(path.read_text())
+        if path.name not in STATUS_OWNERS and pattern.search(path.read_text())
     ]
     assert offenders == []
 
