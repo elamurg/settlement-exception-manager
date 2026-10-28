@@ -165,3 +165,124 @@ cases:
       - reference: "T-1"
     expected:
       clean: ["T-1"]
+
+  # --- REALLY_TWO: one trade, two separate problems ---
+
+  - id: "ssi-and-price"
+    kind: "REALLY_TWO"
+    title: "Wrong account and the amount 2% off, on the same trade"
+    rationale: >
+      Everything in the economic key matches, so the trade and line pair up. But the
+      custodian settled against a different account (our SSI on file is stale or theirs is
+      wrong) AND its amount is 2% off, far outside tolerance. These are two independent
+      problems with two different fixes: correct the settlement instructions, and resolve
+      the amount with the counterparty. Reporting only one would leave the other to fail.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_account: "9999999999"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "SSI_MISMATCH"
+          trade: "T-1"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  - id: "near-match-hides-ssi"
+    kind: "REALLY_TWO"
+    title: "Settlement date differs, and the account is wrong too"
+    rationale: >
+      The line is a day late, so it doesn't match exactly and is found as a near match on
+      the date. It ALSO carries a different account. Fixing only the date would leave the
+      trade settling to the wrong account. A second problem must not hide behind the first.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        intended_settlement_date: "2026-10-07"
+        counterparty_account: "9999999999"
+    expected:
+      breaks:
+        - type: "DATE_MISMATCH"
+          trade: "T-1"
+        - type: "SSI_MISMATCH"
+          trade: "T-1"
+
+  - id: "duplicate-with-price-difference"
+    kind: "REALLY_TWO"
+    title: "Booked twice, and the custodian's amount is off too"
+    rationale: >
+      The same trade is on our book twice and the custodian has one line: a duplicate
+      booking, flagged on both bookings so a human picks which to cancel. Separately, that
+      line's amount is 2% off the trade it references (T-1). Cancelling the duplicate
+      wouldn't fix the amount, so both are breaks.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+    statement:
+      - reference: "T-1"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "DUPLICATE_BOOKING"
+          trade: "T-1"
+        - type: "DUPLICATE_BOOKING"
+          trade: "T-2"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  # --- TWO_CAUSES: could be either, so a human decides ---
+
+  - id: "lei-and-quantity"
+    kind: "TWO_CAUSES"
+    title: "Wrong counterparty and wrong quantity"
+    rationale: >
+      The line names a different counterparty AND a different quantity. Either it is our
+      trade with two problems, or it is a different trade with a different counterparty that
+      happens to be in the same security. Those need opposite actions (fix ours vs. ignore
+      theirs), so the engine must not guess: a human decides.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_lei: "5493001KJTIIGC8Y1R12"
+        quantity: "900"
+    expected:
+      unresolved: ["T-1"]
+
+  - id: "one-line-two-candidates"
+    kind: "TWO_CAUSES"
+    title: "A line for 1,050 shares, between trades for 1,000 and 1,100"
+    rationale: >
+      Two of our trades differ only in quantity (1,000 and 1,100), and the custodian has one
+      line for 1,050 with an unrecognised reference. It's one quantity difference away from
+      BOTH trades, so either could be the one with the break. Picking one would be a coin
+      toss; both trades go to a human.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+        quantity: "1100"
+        consideration: "165275.00"
+    statement:
+      - reference: "UNKNOWN-REF"
+        quantity: "1050"
+    expected:
+      unresolved: ["T-1", "T-2"]
+
+  - id: "opposite-direction"
+    kind: "TWO_CAUSES"
+    title: "Custodian shows a sell where we booked a buy"
+    rationale: >
+      Same security, counterparty, quantity and date, but the opposite direction. Either
+      one side recorded the direction wrong (a serious error: shares would move the wrong
+      way), or it is an unrelated trade the other way. Calling ours "missing at the
+      custodian" would hide a possible direction error, so a human must look.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        side: "SELL"
+    expected:
+      unresolved: ["T-1"]
