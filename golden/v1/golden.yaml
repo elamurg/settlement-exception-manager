@@ -286,3 +286,129 @@ cases:
         side: "SELL"
     expected:
       unresolved: ["T-1"]
+
+  # --- CORPORATE_ACTION: the company changed its shares, nobody made a mistake ---
+
+  - id: "reverse-split"
+    kind: "CORPORATE_ACTION"
+    title: "1-for-10 reverse split: 1,000 shares become 100"
+    rationale: >
+      The opposite of a split: the company combines every 10 shares into 1, usually to
+      raise a low share price. The custodian shows 100 shares for the same 150,250.00. As
+      with a split, the unchanged value is the clue that this is a corporate action, not a
+      quantity break.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "100"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "bonus-issue"
+    kind: "CORPORATE_ACTION"
+    title: "1-for-2 bonus issue: 1,000 shares become 1,500"
+    rationale: >
+      A bonus issue gives shareholders one free share for every two held, so 1,000 becomes
+      1,500. Unlike a 2-for-1 split, the ratio isn't a whole number, which is a good test
+      that "same value, different quantity" is recognised for any ratio, not just doubling.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "1500"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "isin-change"
+    kind: "CORPORATE_ACTION"
+    title: "The security's ISIN changed after a reorganisation"
+    rationale: >
+      After a merger or reorganisation, a security can be re-issued under a new ISIN.
+      Everything else about the line matches our trade: counterparty, quantity, amount,
+      date, reference. A changed ISIN normally means a different security entirely, so
+      this must not be matched as-is; but it isn't "missing" either. It's a corporate
+      action: our booking needs moving to the new ISIN.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        isin: "GB00B03MLX29"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "split-and-price-off"
+    kind: "REALLY_TWO"
+    title: "A 2-for-1 split, and the amount is 2% off as well"
+    rationale: >
+      The quantity doubled (a split), but this time the amount also differs by 2%. The
+      split explains the quantity but not the money, so there are two things to resolve:
+      adjust the booking for the split, and query the amount. The "unchanged value" clue
+      doesn't hold here, which is exactly why both must be reported.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "2000"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  # --- more MUST_BE_CLEAN traps ---
+
+  - id: "friday-to-monday"
+    kind: "MUST_BE_CLEAN"
+    title: "Traded on a Friday, settles on Monday"
+    rationale: >
+      T+1 counts business days, so a Friday trade settles on Monday, not Saturday. Both
+      sides say Monday. A system counting calendar days would expect Saturday and raise a
+      false date break.
+    book:
+      - trade_id: "T-1"
+        trade_date: "2026-10-09"
+        intended_settlement_date: "2026-10-12"
+    statement:
+      - reference: "T-1"
+    expected:
+      clean: ["T-1"]
+
+  - id: "gbp-within-tolerance"
+    kind: "MUST_BE_CLEAN"
+    title: "A sterling trade 10.00 off, within the GBP tolerance"
+    rationale: >
+      A UK security settling in GBP. The custodian's amount is 10.00 higher; the GBP rule
+      allows the greater of 5.00 and 0.01% (15.025 here), so it's within tolerance. Checks
+      that the tolerance for the trade's own currency is used, not only EUR's.
+    book:
+      - trade_id: "T-1"
+        isin: "GB0002634946"
+        currency: "GBP"
+    statement:
+      - reference: "T-1"
+        consideration: "150260.00"
+    expected:
+      clean: ["T-1"]
+
+  - id: "reference-missing-but-unique"
+    kind: "MUST_BE_CLEAN"
+    title: "The custodian lost our reference, but the trade is unmistakable"
+    rationale: >
+      Custodians sometimes drop or mangle our reference. Here every economic field matches
+      exactly and there is only one candidate, so the reference isn't needed: matching is
+      on the economic key. Treating a missing reference as a break would be noise.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "NO-REF"
+    expected:
+      clean: ["T-1"]
