@@ -1,0 +1,46 @@
+# Golden break set v1 (SE-16): the fixed exam every change to the pipeline is marked against.
+#
+# Never edit a released version: copy it to golden/v2/ and change that, so earlier results
+# stay comparable. Every value is quoted, so numbers and dates are read as exact text.
+#
+# Two parts:
+#   generated  the generator's settings. It's reproducible, so these settings plus its
+#              manifest are the answer key for thousands of ordinary breaks.
+#   cases      hand-written hard cases the generator can't make, each with the right answer
+#              and why.
+#
+# Writing a case:
+#   book       trades. Each starts from the standard trade (see golden.py); write only the
+#              fields that differ. trade_id is required.
+#   statement  custodian lines. Each starts as a perfect match for the trade in `reference`;
+#              write only the fields that differ. line_id is optional.
+#   expected   the right answer, not what the engine currently does. Every trade in the case
+#              appears in exactly one of:
+#                clean:      ["T-1", ...]                          should come out clean
+#                breaks:     [{type: "QUANTITY_BREAK", trade: "T-1"}, ...]
+#                unresolved: ["T-1", ...]                          should be left for a human
+#   kind       TWO_CAUSES, REALLY_TWO, CORPORATE_ACTION or MUST_BE_CLEAN
+#   rationale  why that's the right answer. Required.
+
+version: "v1"
+
+generated:
+  trades: "5000"
+  seed: "42"
+
+cases:
+  - id: "two-fields-off"
+    kind: "TWO_CAUSES"
+    title: "Quantity and settlement date both differ"
+    rationale: >
+      The custodian's line differs in two economic fields. It could be one trade with two
+      problems, or a line belonging to a different trade. The engine can't tell which, so a
+      human must look. Calling it "missing" would send ops chasing an instruction that exists.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "900"
+        intended_settlement_date: "2026-10-07"
+    expected:
+      unresolved: ["T-1"]
