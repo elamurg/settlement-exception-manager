@@ -44,3 +44,124 @@ cases:
         intended_settlement_date: "2026-10-07"
     expected:
       unresolved: ["T-1"]
+
+  - id: "stock-split"
+    kind: "CORPORATE_ACTION"
+    title: "2-for-1 split doubles the quantity, value unchanged"
+    rationale: >
+      We booked 1,000 shares for 150,250.00. The custodian shows 2,000 shares for the same
+      150,250.00: the company split each share into two, so there are twice as many shares
+      at half the price and the total value is unchanged. That unchanged value is the clue.
+      A real quantity error would change the money too (or leave the quantity off by an
+      odd amount). Raising a QUANTITY_BREAK would have ops "fix" a correct position; the
+      right answer is CORPORATE_ACTION, so our booking is adjusted for the split.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "2000"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  # --- MUST_BE_CLEAN: traps for false alarms ---
+
+  - id: "within-tolerance"
+    kind: "MUST_BE_CLEAN"
+    title: "Consideration 3.00 off on a 150,250.00 trade"
+    rationale: >
+      The custodian's amount is 3.00 higher. Under tolerance set v1, EUR allows the greater
+      of 5.00 and 0.01% of our amount (15.025 here), so 3.00 is within tolerance: a rounding
+      or fee difference, not a break. Flagging it would bury ops in noise.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        consideration: "150253.00"
+    expected:
+      clean: ["T-1"]
+
+  - id: "small-trade-absolute-floor"
+    kind: "MUST_BE_CLEAN"
+    title: "4.99 off on a 10,000.00 trade: the 5.00 floor applies"
+    rationale: >
+      On a small trade, 0.01% is only 1.00, so a percentage-only rule would flag a 4.99
+      difference. The EUR rule's absolute floor of 5.00 is there for exactly this: small
+      trades get at least 5.00 of room. 4.99 is inside it, so the trade is clean.
+    book:
+      - trade_id: "T-1"
+        quantity: "100"
+        price: "100.00"
+        consideration: "10000.00"
+    statement:
+      - reference: "T-1"
+        consideration: "10004.99"
+    expected:
+      clean: ["T-1"]
+
+  - id: "same-security-different-trades"
+    kind: "MUST_BE_CLEAN"
+    title: "Two trades in the same security, different quantities"
+    rationale: >
+      Two separate trades in SAP with the same counterparty and date, for 1,000 and 500
+      shares, each with its own matching line. Same security and counterparty is normal
+      business, not a duplicate: the quantities differ, so each pairs with its own line.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+        quantity: "500"
+        consideration: "75125.00"
+    statement:
+      - reference: "T-1"
+      - reference: "T-2"
+    expected:
+      clean: ["T-1", "T-2"]
+
+  - id: "identical-twins-each-matched"
+    kind: "MUST_BE_CLEAN"
+    title: "Two identical trades, and the custodian has both"
+    rationale: >
+      Two genuinely separate trades with identical economics (it happens: the same order
+      filled twice). The custodian has a line for each. Booked twice and settling twice is
+      correct, so both are clean. Only identical trades with ONE line are a duplicate
+      booking; the line references tell the two apart.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+    statement:
+      - reference: "T-1"
+      - reference: "T-2"
+    expected:
+      clean: ["T-1", "T-2"]
+
+  - id: "lowercase-bic"
+    kind: "MUST_BE_CLEAN"
+    title: "Custodian reports our counterparty's BIC in lowercase"
+    rationale: >
+      The custodian wrote "deutdeff" where our SSI says "DEUTDEFF". BICs are case-insensitive
+      codes, so this is the same bank: the parser normalises codes to upper case before
+      comparing. Raising an SSI_MISMATCH here would be a false break caused by formatting.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_bic: "deutdeff"
+    expected:
+      clean: ["T-1"]
+
+  - id: "free-of-payment"
+    kind: "MUST_BE_CLEAN"
+    title: "Free of payment: zero consideration on both sides"
+    rationale: >
+      A free-of-payment (FOP) delivery moves shares with no cash leg, so the consideration
+      is 0.00 on both sides. Zero is correct here, not a missing amount: there's nothing to
+      compare, so no PRICE_BREAK.
+    book:
+      - trade_id: "T-1"
+        settlement_method: "FOP"
+        consideration: "0.00"
+    statement:
+      - reference: "T-1"
+    expected:
+      clean: ["T-1"]
