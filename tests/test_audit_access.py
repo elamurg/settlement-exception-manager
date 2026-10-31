@@ -97,13 +97,13 @@ def test_writer_can_add_and_read_events(writer: Collection[dict[str, Any]]) -> N
 
 
 def test_writer_cannot_update_an_event(writer: Collection[dict[str, Any]]) -> None:
-    AuditStore(writer).append(event("E-1"))
+    stored = AuditStore(writer).append(event("E-1"))
 
     with pytest.raises(OperationFailure) as error:
         writer.update_one({"_id": "E-1"}, {"$set": {"actor": "someone-else"}})
 
     assert_refused(error)
-    assert AuditStore(writer).events_for("Trade", "T-1") == [event("E-1")]
+    assert AuditStore(writer).events_for("Trade", "T-1") == [stored]
 
 
 def test_writer_cannot_replace_an_event(writer: Collection[dict[str, Any]]) -> None:

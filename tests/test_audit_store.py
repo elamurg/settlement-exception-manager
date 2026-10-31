@@ -8,6 +8,7 @@ Skipped unless MONGO_URL is set. Locally, with docker compose running:
 import os
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,7 +18,7 @@ from pymongo.collection import Collection
 
 from settlement.domain.errors import InvalidModel
 from settlement.domain.models import AuditEvent
-from settlement.storage.audit import COLLECTION, AuditStore
+from settlement.storage.audit import COLLECTION, AuditStore, create_indexes
 from settlement.storage.errors import AuditStoreError
 
 
@@ -29,6 +30,7 @@ def collection() -> Iterator[Collection[dict[str, Any]]]:
         pytest.skip("MONGO_URL not set; start MongoDB with docker compose to run this")
     client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
     database = f"test_audit_{uuid.uuid4().hex[:8]}"
+    create_indexes(client[database][COLLECTION])
     yield client[database][COLLECTION]
     client.drop_database(database)
     client.close()
@@ -61,9 +63,10 @@ def event(
 def test_an_event_comes_back_exactly_as_it_went_in(store: AuditStore) -> None:
     original = event("E-1", 9)
 
-    store.append(original)
+    stored = store.append(original)
 
-    assert store.events_for("Trade", "T-1") == [original]
+    assert stored == replace(original, sequence=1)
+    assert store.events_for("Trade", "T-1") == [stored]
 
 
 def test_timestamps_keep_their_timezone(store: AuditStore) -> None:
@@ -75,25 +78,49 @@ def test_timestamps_keep_their_timezone(store: AuditStore) -> None:
     assert read_back.occurred_at == datetime(2026, 10, 6, 9, 0, tzinfo=UTC)
 
 
-def test_events_come_back_oldest_first(store: AuditStore) -> None:
-    later, earlier = event("E-2", 11), event("E-1", 9)
-    store.append(later)  # saved out of order on purpose
-    store.append(earlier)
+def test_events_are_numbered_in_the_order_they_were_written(store: AuditStore) -> None:
+    first, second = store.append(event("E-1", 9)), store.append(event("E-2", 11))
 
-    assert store.events_for("Trade", "T-1") == [earlier, later]
+    assert (first.sequence, second.sequence) == (1, 2)
+    assert store.events_for("Trade", "T-1") == [first, second]
 
 
-def test_same_time_is_ordered_by_event_id(store: AuditStore) -> None:
-    store.append(event("E-B", 9))
-    store.append(event("E-A", 9))
+def test_each_record_is_numbered_on_its_own(store: AuditStore) -> None:
+    store.append(event("E-1", 9, entity_id="T-1"))
 
-    assert [e.event_id for e in store.events_for("Trade", "T-1")] == ["E-A", "E-B"]
+    assert store.append(event("E-2", 9, entity_id="T-2")).sequence == 1
+
+
+def test_same_time_keeps_the_order_written_not_the_id_as_text(store: AuditStore) -> None:
+    """As text, "E-10" sorts before "E-9". The sequence doesn't care what the id says."""
+    store.append(event("E-9", 9))
+    store.append(event("E-10", 9))
+
+    assert [e.event_id for e in store.events_for("Trade", "T-1")] == ["E-9", "E-10"]
+
+
+def test_losing_a_race_to_the_same_position_is_refused(
+    store: AuditStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two writers both read "highest is 1" and both try to write #2: only one may win."""
+    store.append(event("E-1", 9))
+    winner = store.append(event("E-2", 10))
+    monkeypatch.setattr(store, "_next_sequence", lambda _event: 2)  # the loser's stale read
+
+    with pytest.raises(AuditStoreError, match="'T-1' changed while event 'E-3'"):
+        store.append(event("E-3", 10))
+
+    assert store.events_for("Trade", "T-1")[-1] == winner
+
+
+def test_an_event_that_already_has_a_sequence_is_refused(store: AuditStore) -> None:
+    with pytest.raises(AuditStoreError, match="the store numbers events itself"):
+        store.append(replace(event("E-1", 9), sequence=5))
 
 
 def test_only_that_records_events_come_back(store: AuditStore) -> None:
-    mine, theirs = event("E-1", 9, entity_id="T-1"), event("E-2", 9, entity_id="T-2")
-    store.append(mine)
-    store.append(theirs)
+    mine = store.append(event("E-1", 9, entity_id="T-1"))
+    store.append(event("E-2", 9, entity_id="T-2"))
 
     assert store.events_for("Trade", "T-1") == [mine]
     assert store.events_for("Break", "T-1") == []  # same id, different kind of record
@@ -104,20 +131,19 @@ def test_a_record_with_no_events_gives_an_empty_list(store: AuditStore) -> None:
 
 
 def test_optional_before_and_after_survive(store: AuditStore) -> None:
-    raised = event("E-1", 9, before=None, after=None)
-    store.append(raised)
+    raised = store.append(event("E-1", 9, before=None, after=None))
 
     assert store.events_for("Trade", "T-1") == [raised]
 
 
 def test_recording_an_event_twice_is_refused(store: AuditStore) -> None:
     original = event("E-1", 9)
-    store.append(original)
+    stored = store.append(original)
 
     with pytest.raises(AuditStoreError, match="'E-1' is already recorded"):
         store.append(replace_actor(original, "someone-else"))
 
-    assert store.events_for("Trade", "T-1") == [original]  # the first one is untouched
+    assert store.events_for("Trade", "T-1") == [stored]  # the first one is untouched
 
 
 def test_a_corrupt_document_is_caught_when_read(
@@ -135,6 +161,7 @@ def test_a_corrupt_document_is_caught_when_read(
             "occurred_at": datetime(2026, 10, 6, 10, 0, tzinfo=UTC),
             "before": None,
             "after": None,
+            "sequence": 2,
         }
     )
 

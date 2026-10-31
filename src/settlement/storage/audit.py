@@ -1,10 +1,11 @@
 """Append-only audit store in MongoDB (SE-15): every event is written once and never changed."""
 
 from collections.abc import Mapping
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
-from pymongo import MongoClient
+from pymongo import DESCENDING, MongoClient
 from pymongo.collection import Collection
 from pymongo.errors import DuplicateKeyError
 
@@ -13,6 +14,16 @@ from settlement.domain.models import AuditEvent
 from settlement.storage.errors import AuditStoreError
 
 COLLECTION = "audit_events"
+
+# One event per position in a record's history. Two writers that both try to add event #4
+# to the same record: MongoDB accepts the first and refuses the second.
+_POSITION_INDEX = "one_event_per_position"
+_POSITION_KEYS = [("entity_type", 1), ("entity_id", 1), ("sequence", 1)]
+
+
+def create_indexes(collection: Collection[dict[str, Any]]) -> None:
+    """Create the unique position index. Needs an admin login; safe to run again."""
+    collection.create_index(_POSITION_KEYS, name=_POSITION_INDEX, unique=True)
 
 
 class AuditStore:
@@ -28,23 +39,48 @@ class AuditStore:
         client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
         return cls(client[database][COLLECTION])
 
-    def append(self, event: AuditEvent) -> None:
-        """Record an event. The same event_id twice is an error, never a silent overwrite."""
+    def append(self, event: AuditEvent) -> AuditEvent:
+        """Record an event as the next one in its record's history, and return it numbered.
+
+        The same event_id twice is an error, never a silent overwrite. So is losing a race:
+        if another writer added an event to this record in the meantime, this one was built
+        from an out-of-date state, and the caller has to re-read and try again.
+        """
+        if event.sequence is not None:
+            raise AuditStoreError(
+                f"event {event.event_id!r} already has sequence {event.sequence}; "
+                "the store numbers events itself"
+            )
+        numbered = replace(event, sequence=self._next_sequence(event))
         try:
-            self._events.insert_one(_to_document(event))
-        except DuplicateKeyError:
-            raise AuditStoreError(f"event {event.event_id!r} is already recorded") from None
+            self._events.insert_one(_to_document(numbered))
+        except DuplicateKeyError as error:
+            if "_id" in (error.details or {}).get("keyPattern", {}):
+                raise AuditStoreError(f"event {event.event_id!r} is already recorded") from None
+            raise AuditStoreError(
+                f"{event.entity_type} {event.entity_id!r} changed while event "
+                f"{event.event_id!r} was being written; re-read it and try again"
+            ) from None
+        return numbered
 
     def events_for(self, entity_type: str, entity_id: str) -> list[AuditEvent]:
-        """Every event for one record, oldest first."""
+        """Every event for one record, in the order they were written."""
         documents = self._events.find({"entity_type": entity_type, "entity_id": entity_id})
-        return [_from_document(doc) for doc in documents.sort([("occurred_at", 1), ("_id", 1)])]
+        return [_from_document(doc) for doc in documents.sort("sequence", 1)]
 
     def state_as_of(
         self, entity_type: str, entity_id: str, at: datetime
     ) -> history.StateAsOf | None:
         """What a record looked like at `at`, rebuilt from its events alone."""
         return history.state_as_of(self.events_for(entity_type, entity_id), at)
+
+    def _next_sequence(self, event: AuditEvent) -> int:
+        """One more than the highest sequence this record has, or 1 for its first event."""
+        latest = self._events.find_one(
+            {"entity_type": event.entity_type, "entity_id": event.entity_id},
+            sort=[("sequence", DESCENDING)],
+        )
+        return 1 if latest is None else int(latest["sequence"]) + 1
 
 
 def _to_document(event: AuditEvent) -> dict[str, Any]:
@@ -58,6 +94,7 @@ def _to_document(event: AuditEvent) -> dict[str, Any]:
         "occurred_at": event.occurred_at,
         "before": event.before,
         "after": event.after,
+        "sequence": event.sequence,
     }
 
 
@@ -72,4 +109,5 @@ def _from_document(document: Mapping[str, Any]) -> AuditEvent:
         occurred_at=document["occurred_at"],
         before=document["before"],
         after=document["after"],
+        sequence=document["sequence"],
     )
