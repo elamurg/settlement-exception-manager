@@ -10,5 +10,6 @@ class ParseError(DomainError):
         self.source = source
         self.line = line
         self.field = field
+        self.message = message  # without the "source line N" prefix, so it can be re-raised
         where = f"{source} line {line}" + (f", field {field!r}" if field else "")
         super().__init__(f"{where}: {message}")
