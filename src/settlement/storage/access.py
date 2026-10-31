@@ -8,7 +8,7 @@ from typing import Any
 
 from pymongo.database import Database
 
-from settlement.storage.audit import COLLECTION, create_indexes
+from settlement.storage.audit import COLLECTION, set_up_collection
 
 ROLE = "audit_appender"
 ALLOWED_ACTIONS = ("insert", "find")  # what the role may do: add events and read them, nothing else
@@ -17,11 +17,11 @@ ALLOWED_ACTIONS = ("insert", "find")  # what the role may do: add events and rea
 def grant_append_only_access(
     database: Database[dict[str, Any]], username: str, password: str
 ) -> None:
-    """Create the append-only role, a user who has only that role, and the audit indexes.
+    """Create the audit collection, the append-only role, and a user who has only that role.
 
     Run once, connected as an admin. Safe to run again: anything that exists is left alone.
     """
-    create_indexes(database[COLLECTION])
+    set_up_collection(database)
     if not database.command("rolesInfo", ROLE)["roles"]:
         database.command(
             "createRole",

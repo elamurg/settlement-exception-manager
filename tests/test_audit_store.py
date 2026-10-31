@@ -15,10 +15,10 @@ from typing import Any
 import pytest
 from pymongo import MongoClient
 from pymongo.collection import Collection
+from pymongo.errors import WriteError
 
-from settlement.domain.errors import InvalidModel
 from settlement.domain.models import AuditEvent
-from settlement.storage.audit import COLLECTION, AuditStore, create_indexes
+from settlement.storage.audit import COLLECTION, AuditStore, set_up_collection
 from settlement.storage.errors import AuditStoreError
 
 
@@ -30,7 +30,7 @@ def collection() -> Iterator[Collection[dict[str, Any]]]:
         pytest.skip("MONGO_URL not set; start MongoDB with docker compose to run this")
     client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
     database = f"test_audit_{uuid.uuid4().hex[:8]}"
-    create_indexes(client[database][COLLECTION])
+    set_up_collection(client[database])
     yield client[database][COLLECTION]
     client.drop_database(database)
     client.close()
@@ -146,26 +146,69 @@ def test_recording_an_event_twice_is_refused(store: AuditStore) -> None:
     assert store.events_for("Trade", "T-1") == [stored]  # the first one is untouched
 
 
-def test_a_corrupt_document_is_caught_when_read(
-    store: AuditStore, collection: Collection[dict[str, Any]]
-) -> None:
-    """Reading rebuilds an AuditEvent, so its validation runs on the way out too."""
-    store.append(event("E-1", 9))
-    collection.insert_one(
-        {
-            "_id": "E-BAD",
-            "entity_type": "Trade",
-            "entity_id": "T-1",
-            "event_type": "STATUS_CHANGED",
-            "actor": "",  # an event must say who did it
-            "occurred_at": datetime(2026, 10, 6, 10, 0, tzinfo=UTC),
-            "before": None,
-            "after": None,
-            "sequence": 2,
-        }
-    )
+DOCUMENT_VALIDATION_FAILED = 121  # MongoDB's error code when the validator refuses a write
 
-    with pytest.raises(InvalidModel, match="actor"):
+
+def a_document(**changes: Any) -> dict[str, Any]:
+    """A well-formed audit document, with `changes` applied (None removes a field)."""
+    document: dict[str, Any] = {
+        "_id": "E-BAD",
+        "entity_type": "Trade",
+        "entity_id": "T-1",
+        "event_type": "STATUS_CHANGED",
+        "actor": "system",
+        "occurred_at": datetime(2026, 10, 6, 10, 0, tzinfo=UTC),
+        "before": "BOOKED",
+        "after": "ALLOCATED",
+        "sequence": 1,
+    }
+    document.update(changes)
+    return {name: value for name, value in document.items() if value is not None}
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"actor": None},  # a required field missing
+        {"actor": ""},  # empty text
+        {"sequence": 0},  # positions start at 1
+        {"sequence": "1"},  # wrong type
+        {"occurred_at": "2026-10-06T10:00:00Z"},  # a string, not a date
+        {"extra": "field"},  # nothing the event doesn't have
+    ],
+)
+def test_the_validator_refuses_a_malformed_document(
+    collection: Collection[dict[str, Any]], changes: dict[str, Any]
+) -> None:
+    with pytest.raises(WriteError) as error:
+        collection.insert_one(a_document(**changes))
+
+    assert error.value.code == DOCUMENT_VALIDATION_FAILED
+
+
+def test_the_validator_accepts_a_well_formed_document(
+    collection: Collection[dict[str, Any]],
+) -> None:
+    collection.insert_one(a_document())
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"actor": None}, "'E-BAD' is missing field 'actor'"),
+        ({"actor": ""}, "'E-BAD' is invalid: actor must not be empty"),
+    ],
+)
+def test_a_malformed_document_that_got_in_anyway_is_reported_by_id(
+    store: AuditStore,
+    collection: Collection[dict[str, Any]],
+    changes: dict[str, Any],
+    message: str,
+) -> None:
+    """E.g. written before the validator existed. An admin can skip it; the app can't."""
+    collection.insert_one(a_document(**changes), bypass_document_validation=True)
+
+    with pytest.raises(AuditStoreError, match=message):
         store.events_for("Trade", "T-1")
 
 

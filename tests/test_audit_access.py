@@ -134,6 +134,14 @@ def test_writer_cannot_drop_the_whole_log(writer: Collection[dict[str, Any]]) ->
     assert_refused(error)
 
 
+def test_writer_cannot_skip_the_validator(writer: Collection[dict[str, Any]]) -> None:
+    with pytest.raises(OperationFailure) as error:
+        writer.insert_one({"_id": "JUNK"}, bypass_document_validation=True)
+
+    assert_refused(error)
+    assert writer.find_one({"_id": "JUNK"}) is None
+
+
 def test_writer_cannot_give_itself_more_powers(writer: Collection[dict[str, Any]]) -> None:
     with pytest.raises(OperationFailure) as error:
         writer.database.command("createUser", "sneaky", pwd="x", roles=["readWrite"])

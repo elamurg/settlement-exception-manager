@@ -7,9 +7,11 @@ from typing import Any
 
 from pymongo import DESCENDING, MongoClient
 from pymongo.collection import Collection
+from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
 from settlement.domain import history
+from settlement.domain.errors import InvalidModel
 from settlement.domain.models import AuditEvent
 from settlement.storage.errors import AuditStoreError
 
@@ -21,9 +23,53 @@ _POSITION_INDEX = "one_event_per_position"
 _POSITION_KEYS = [("entity_type", 1), ("entity_id", 1), ("sequence", 1)]
 
 
-def create_indexes(collection: Collection[dict[str, Any]]) -> None:
-    """Create the unique position index. Needs an admin login; safe to run again."""
-    collection.create_index(_POSITION_KEYS, name=_POSITION_INDEX, unique=True)
+_TEXT = {"bsonType": "string", "minLength": 1}
+_STATE = {"bsonType": ["string", "null"]}
+
+# The shape of every audit document. MongoDB refuses an insert that doesn't fit, so a
+# malformed event can't get in and make its record unreadable. The append-only role has
+# no bypassDocumentValidation, so the app can't switch this off.
+SCHEMA: Mapping[str, Any] = {
+    "$jsonSchema": {
+        "bsonType": "object",
+        "required": [
+            "_id",
+            "entity_type",
+            "entity_id",
+            "event_type",
+            "actor",
+            "occurred_at",
+            "before",
+            "after",
+            "sequence",
+        ],
+        "additionalProperties": False,
+        "properties": {
+            "_id": _TEXT,
+            "entity_type": _TEXT,
+            "entity_id": _TEXT,
+            "event_type": _TEXT,
+            "actor": _TEXT,
+            "occurred_at": {"bsonType": "date"},
+            "before": _STATE,
+            "after": _STATE,
+            "sequence": {"bsonType": ["int", "long"], "minimum": 1},
+        },
+    }
+}
+
+
+def set_up_collection(database: Database[dict[str, Any]]) -> None:
+    """Create the audit collection with its validator and unique position index.
+
+    Needs an admin login. Safe to run again: an existing collection gets the current
+    validator, and an existing index is left alone.
+    """
+    if COLLECTION in database.list_collection_names():
+        database.command("collMod", COLLECTION, validator=SCHEMA, validationLevel="strict")
+    else:
+        database.create_collection(COLLECTION, validator=SCHEMA, validationLevel="strict")
+    database[COLLECTION].create_index(_POSITION_KEYS, name=_POSITION_INDEX, unique=True)
 
 
 class AuditStore:
@@ -99,15 +145,28 @@ def _to_document(event: AuditEvent) -> dict[str, Any]:
 
 
 def _from_document(document: Mapping[str, Any]) -> AuditEvent:
-    """A MongoDB document back into an AuditEvent, so all of its validation runs again."""
-    return AuditEvent(
-        event_id=document["_id"],
-        entity_type=document["entity_type"],
-        entity_id=document["entity_id"],
-        event_type=document["event_type"],
-        actor=document["actor"],
-        occurred_at=document["occurred_at"],
-        before=document["before"],
-        after=document["after"],
-        sequence=document["sequence"],
-    )
+    """A MongoDB document back into an AuditEvent, so all of its validation runs again.
+
+    The validator keeps malformed documents out, but one written before it existed (or by
+    an admin, who can bypass it) is reported by its id rather than as a bare KeyError.
+    """
+    try:
+        return AuditEvent(
+            event_id=document["_id"],
+            entity_type=document["entity_type"],
+            entity_id=document["entity_id"],
+            event_type=document["event_type"],
+            actor=document["actor"],
+            occurred_at=document["occurred_at"],
+            before=document["before"],
+            after=document["after"],
+            sequence=document["sequence"],
+        )
+    except KeyError as error:
+        raise AuditStoreError(
+            f"audit document {document.get('_id')!r} is missing field {error}"
+        ) from None
+    except InvalidModel as error:
+        raise AuditStoreError(
+            f"audit document {document.get('_id')!r} is invalid: {error}"
+        ) from None
