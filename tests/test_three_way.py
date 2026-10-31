@@ -103,13 +103,36 @@ def test_both_bookings_of_a_duplicate_use_the_shared_lines_status(
     """The status is filed under the line's reference, which only one booking has."""
     copy = replace(trade, trade_id="T-COPY")
     line = line_for(data, trade)
-    breaks = [replace(a_break(t, line), break_id=f"B-{t.trade_id}") for t in (trade, copy)]
+    breaks = [
+        replace(
+            a_break(t, line), break_id=f"B-{t.trade_id}", break_type=BreakType.DUPLICATE_BOOKING
+        )
+        for t in (trade, copy)
+    ]
 
     result = attribute(
         breaks, [], [matched(trade.trade_id)], [trade.trade_id, "T-COPY"], raised_at=RAISED_AT
     )
 
     assert set(result.legs.values()) == {Leg.INTERNAL}
+
+
+def test_break_uses_our_trade_ids_status_not_the_lines_reference(
+    data: GeneratedData, trade: Trade
+) -> None:
+    """A custodian line echoing the wrong reference must not borrow that trade's status."""
+    line = replace(line_for(data, trade), reference="T-OTHER")
+    brk = a_break(trade, line)
+
+    result = attribute(
+        [brk],
+        [],
+        [matched(trade.trade_id), not_matched("T-OTHER")],
+        [trade.trade_id, "T-OTHER"],
+        raised_at=RAISED_AT,
+    )
+
+    assert result.legs[brk.break_id] == Leg.INTERNAL
 
 
 def test_clean_trade_not_matched_at_the_csd_becomes_a_counterparty_break(trade: Trade) -> None:

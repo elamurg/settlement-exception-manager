@@ -122,8 +122,7 @@ def attribute(
 
     legs: dict[str, Leg] = {}
     for brk in breaks:
-        reference = _instruction_reference(brk)
-        status = status_for.get(reference) if reference is not None else None
+        status = _status_for_break(brk, status_for)
         legs[brk.break_id] = locate(book_custodian_break=True, status=status) or Leg.UNKNOWN
 
     counterparty_breaks: list[Break] = []
@@ -157,16 +156,18 @@ def attribute(
     )
 
 
-def _instruction_reference(brk: Break) -> str | None:
-    """Which instruction a break's CSD status is filed under.
+def _status_for_break(brk: Break, status_for: Mapping[str, CsdStatus]) -> CsdStatus | None:
+    """The CSD status of a break's instruction, or None if there isn't one yet.
 
-    The custodian's line says which of our instructions it settled, so it wins when there is
-    one: both bookings of a duplicate share one line and therefore one status.
+    Our instruction is filed under our trade id, the same as for a clean trade. The line's
+    reference is the custodian's echo of it and can be wrong, so it must not borrow another
+    trade's status. The one exception is a duplicate booking: both bookings share one line
+    and therefore one status, filed under the reference only one of them has.
     """
-    if brk.theirs is not None:
-        return brk.theirs.reference
-    if brk.ours is not None:
-        return brk.ours.trade_id
+    if brk.ours is not None and brk.ours.trade_id in status_for:
+        return status_for[brk.ours.trade_id]
+    if brk.break_type == BreakType.DUPLICATE_BOOKING and brk.theirs is not None:
+        return status_for.get(brk.theirs.reference)
     return None
 
 
