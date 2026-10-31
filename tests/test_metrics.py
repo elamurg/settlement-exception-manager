@@ -9,6 +9,7 @@ from settlement.evaluation.metrics import (
     classification_by_type,
     false_break_rate,
     match_rate,
+    prioritisation_quality,
 )
 
 
@@ -89,3 +90,36 @@ def test_classification_by_type() -> None:
 
 def test_types_that_never_appear_are_left_out() -> None:
     assert BreakType.DATE_MISMATCH not in classification_by_type(OUTCOMES)
+
+
+# Prioritisation. Worked example: the ideal queue is A, B, C (A most urgent).
+#   ours A, C, B:  A<B yes, A<C yes, B<C no  -> 2 / 3
+
+
+@pytest.mark.parametrize(
+    ("ranked", "expected"),
+    [
+        (["A", "C", "B"], Ratio(2, 3)),
+        (["A", "B", "C"], Ratio(3, 3)),  # the ideal order
+        (["C", "B", "A"], Ratio(0, 3)),  # reversed: every pair wrong
+    ],
+)
+def test_prioritisation_quality(ranked: list[str], expected: Ratio) -> None:
+    assert prioritisation_quality(ranked, ["A", "B", "C"]) == expected
+
+
+def test_one_break_has_no_pairs_to_order() -> None:
+    assert prioritisation_quality(["A"], ["A"]).value is None
+
+
+@pytest.mark.parametrize(
+    "ranked",
+    [
+        ["A", "B"],  # C is missing
+        ["A", "B", "C", "D"],  # D isn't in the ideal
+        ["A", "B", "B"],  # B twice
+    ],
+)
+def test_queues_must_hold_the_same_breaks(ranked: list[str]) -> None:
+    with pytest.raises(ValueError, match="same break ids"):
+        prioritisation_quality(ranked, ["A", "B", "C"])

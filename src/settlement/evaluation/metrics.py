@@ -10,6 +10,7 @@ money, so it stays Decimal.
 
 from collections.abc import Sequence, Set
 from dataclasses import dataclass
+from itertools import combinations
 
 from settlement.domain.models import BreakType
 
@@ -70,3 +71,17 @@ def classification_by_type(
                 precision=Ratio(correct, called), recall=Ratio(correct, real)
             )
     return by_type
+
+
+def prioritisation_quality(ranked: Sequence[str], ideal: Sequence[str]) -> Ratio:
+    """Of every pair of breaks, how many our queue has the same way round as the ideal.
+
+    `ranked` is our queue and `ideal` the order a person decided, both most urgent first
+    and holding the same break ids. All pairs right is the ideal order; none is it reversed.
+    """
+    if sorted(ranked) != sorted(ideal) or len(set(ideal)) != len(ideal):
+        raise ValueError("ranked and ideal must hold the same break ids, each once")
+    position = {break_id: index for index, break_id in enumerate(ranked)}
+    pairs = list(combinations(ideal, 2))  # each pair (first, second) is in the ideal order
+    in_order = sum(1 for first, second in pairs if position[first] < position[second])
+    return Ratio(in_order, len(pairs))
