@@ -8,6 +8,7 @@ the ticket's "Done when".
 import os
 import uuid
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -36,7 +37,13 @@ def at(hour: int, minute: int = 0) -> datetime:
     return MONDAY + timedelta(hours=hour, minutes=minute)
 
 
-def change(event_id: str, when: datetime, before: str | None, after: str | None) -> AuditEvent:
+def change(
+    event_id: str,
+    when: datetime,
+    before: str | None,
+    after: str | None,
+    sequence: int | None = None,
+) -> AuditEvent:
     return AuditEvent(
         event_id=event_id,
         entity_type="Trade",
@@ -46,13 +53,14 @@ def change(event_id: str, when: datetime, before: str | None, after: str | None)
         occurred_at=when,
         before=before,
         after=after,
+        sequence=sequence,
     )
 
 
 HISTORY = [
-    change("E-1", at(9), "BOOKED", "ALLOCATED"),
-    change("E-2", at(10), "ALLOCATED", "CONFIRMED"),
-    change("E-3", at(11), "CONFIRMED", "AFFIRMED"),
+    change("E-1", at(9), "BOOKED", "ALLOCATED", sequence=1),
+    change("E-2", at(10), "ALLOCATED", "CONFIRMED", sequence=2),
+    change("E-3", at(11), "CONFIRMED", "AFFIRMED", sequence=3),
 ]
 
 
@@ -94,23 +102,56 @@ def test_order_given_doesnt_matter() -> None:
     assert state_as_of(list(reversed(HISTORY)), at(10, 30)) == state_as_of(HISTORY, at(10, 30))
 
 
-def test_a_gap_in_the_history_is_refused() -> None:
-    """E-2 is missing: E-3 starts from CONFIRMED, but E-1 left it at ALLOCATED."""
-    with pytest.raises(InvalidModel, match="doesn't join up: E-3 starts from 'CONFIRMED'"):
+def test_events_sharing_a_timestamp_replay_in_the_order_written() -> None:
+    """As text, "E-10" sorts before "E-9". The sequence says E-9 came first."""
+    events = [
+        change("E-9", at(9), "BOOKED", "ALLOCATED", sequence=1),
+        change("E-10", at(9), "ALLOCATED", "CONFIRMED", sequence=2),
+    ]
+
+    result = state_as_of(events, at(9))
+
+    assert result is not None
+    assert (result.state, result.event_id) == ("CONFIRMED", "E-10")
+
+
+def test_an_event_without_a_sequence_is_refused() -> None:
+    with pytest.raises(InvalidModel, match="E-4 has no sequence"):
+        state_as_of([*HISTORY, change("E-4", at(12), "AFFIRMED", "INSTRUCTED")], at(12))
+
+
+def test_a_missing_event_is_refused() -> None:
+    """E-2 (#2) is gone from what should be an append-only log."""
+    with pytest.raises(InvalidModel, match="expected event #2, found E-3 as #3"):
         state_as_of([HISTORY[0], HISTORY[2]], at(12))
 
 
-def test_a_backdated_event_is_refused_even_before_the_next_real_one() -> None:
-    """A forged 10:30 cancellation joins up with E-2; only E-3 at 11:00 exposes it."""
-    forged = change("E-X", at(10, 30), "CONFIRMED", "CANCELLED")
+def test_two_events_in_the_same_position_are_refused() -> None:
+    rival = change("E-2B", at(10), "ALLOCATED", "CANCELLED", sequence=2)
+
+    with pytest.raises(InvalidModel, match="history has a gap"):
+        state_as_of([*HISTORY, rival], at(12))
+
+
+def test_a_history_that_doesnt_join_up_is_refused() -> None:
+    """E-3 starts from CONFIRMED, but E-1 left it at ALLOCATED."""
+    events = [HISTORY[0], replace(HISTORY[2], sequence=2)]
 
     with pytest.raises(InvalidModel, match="doesn't join up: E-3 starts from 'CONFIRMED'"):
+        state_as_of(events, at(12))
+
+
+def test_a_backdated_event_is_refused_even_before_the_next_real_one() -> None:
+    """A forged cancellation written after E-3 but dated 10:30, before E-3 happened."""
+    forged = change("E-X", at(10, 30), "CONFIRMED", "CANCELLED", sequence=4)
+
+    with pytest.raises(InvalidModel, match="E-X \\(#4\\) was written after E-3 \\(#3\\)"):
         state_as_of([*HISTORY, forged], at(10, 45))
 
 
-def test_a_gap_after_the_moment_is_still_refused() -> None:
+def test_a_break_after_the_moment_is_still_refused() -> None:
     """Asking about 9:30 only needs E-1, but a broken history can't be trusted at any moment."""
-    broken_later = change("E-9", at(15), "SETTLED", "CANCELLED")
+    broken_later = change("E-9", at(15), "SETTLED", "CANCELLED", sequence=2)
 
     with pytest.raises(InvalidModel, match="doesn't join up: E-9 starts from 'SETTLED'"):
         state_as_of([HISTORY[0], broken_later], at(9, 30))
@@ -118,7 +159,7 @@ def test_a_gap_after_the_moment_is_still_refused() -> None:
 
 def test_an_event_that_leaves_no_state_is_refused() -> None:
     with pytest.raises(InvalidModel, match="E-4"):
-        state_as_of([HISTORY[0], change("E-4", at(10), "ALLOCATED", None)], at(12))
+        state_as_of([HISTORY[0], change("E-4", at(10), "ALLOCATED", None, sequence=2)], at(12))
 
 
 def test_moment_must_have_a_timezone() -> None:
@@ -185,7 +226,7 @@ def test_done_when_state_is_rebuilt_from_events_alone(store: AuditStore) -> None
 
 
 def test_another_trades_events_dont_leak_in(store: AuditStore) -> None:
-    store.append(HISTORY[0])
+    store.append(replace(HISTORY[0], sequence=None))  # the store numbers it
     store.append(
         AuditEvent("E-X", "Trade", "T-2", "STATUS_CHANGED", "system", at(10), "SETTLED", "FAILED")
     )

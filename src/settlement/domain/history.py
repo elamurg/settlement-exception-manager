@@ -22,13 +22,31 @@ class StateAsOf:
 def state_as_of(events: Sequence[AuditEvent], at: datetime) -> StateAsOf | None:
     """Replay events up to `at`. None if nothing had happened yet.
 
+    Events are replayed in the order the audit store wrote them (their sequence), not by
+    timestamp: two events can share a timestamp, and their ids don't sort reliably.
+
     The whole history is checked first, not just the part up to `at`: a backdated event
-    joins up with what came before it, and only the next real event exposes it.
+    joins up with what came before it, and only the events after it expose it.
     """
     require_aware("at", at)
-    ordered = sorted(events, key=lambda event: (event.occurred_at, event.event_id))
+    for event in events:
+        if event.sequence is None:
+            raise InvalidModel(f"{event.event_id} has no sequence: only stored events replay")
+    ordered = sorted(events, key=lambda event: event.sequence or 0)
+
+    for position, event in enumerate(ordered, start=1):
+        if event.sequence != position:
+            raise InvalidModel(
+                f"history has a gap: expected event #{position}, found {event.event_id} "
+                f"as #{event.sequence}"
+            )
 
     for earlier, later in pairwise(ordered):
+        if later.occurred_at < earlier.occurred_at:
+            raise InvalidModel(
+                f"history goes back in time: {later.event_id} (#{later.sequence}) was written "
+                f"after {earlier.event_id} (#{earlier.sequence}) but is dated before it"
+            )
         if later.before != earlier.after:
             raise InvalidModel(
                 f"history doesn't join up: {later.event_id} starts from {later.before!r}, "
