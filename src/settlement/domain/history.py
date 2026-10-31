@@ -3,6 +3,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import pairwise
 
 from settlement.domain.errors import InvalidModel
 from settlement.domain.models import AuditEvent, require_aware
@@ -19,19 +20,25 @@ class StateAsOf:
 
 
 def state_as_of(events: Sequence[AuditEvent], at: datetime) -> StateAsOf | None:
-    """Replay events up to `at`. None if nothing had happened yet."""
+    """Replay events up to `at`. None if nothing had happened yet.
+
+    The whole history is checked first, not just the part up to `at`: a backdated event
+    joins up with what came before it, and only the next real event exposes it.
+    """
     require_aware("at", at)
     ordered = sorted(events, key=lambda event: (event.occurred_at, event.event_id))
+
+    for earlier, later in pairwise(ordered):
+        if later.before != earlier.after:
+            raise InvalidModel(
+                f"history doesn't join up: {later.event_id} starts from {later.before!r}, "
+                f"but {earlier.event_id} left it at {earlier.after!r}"
+            )
 
     current: AuditEvent | None = None
     for event in ordered:
         if event.occurred_at > at:
             break  # this event is after the moment we're asking about: stop
-        if current is not None and event.before != current.after:
-            raise InvalidModel(
-                f"history doesn't join up: {event.event_id} starts from {event.before!r}, "
-                f"but {current.event_id} left it at {current.after!r}"
-            )
         current = event  # this event is the latest one so far
 
     if current is None:

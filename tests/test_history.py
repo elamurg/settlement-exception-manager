@@ -100,14 +100,20 @@ def test_a_gap_in_the_history_is_refused() -> None:
         state_as_of([HISTORY[0], HISTORY[2]], at(12))
 
 
-def test_a_gap_after_the_moment_doesnt_matter() -> None:
-    """Asking about 9:30 only needs E-1; a broken event later can't change that answer."""
+def test_a_backdated_event_is_refused_even_before_the_next_real_one() -> None:
+    """A forged 10:30 cancellation joins up with E-2; only E-3 at 11:00 exposes it."""
+    forged = change("E-X", at(10, 30), "CONFIRMED", "CANCELLED")
+
+    with pytest.raises(InvalidModel, match="doesn't join up: E-3 starts from 'CONFIRMED'"):
+        state_as_of([*HISTORY, forged], at(10, 45))
+
+
+def test_a_gap_after_the_moment_is_still_refused() -> None:
+    """Asking about 9:30 only needs E-1, but a broken history can't be trusted at any moment."""
     broken_later = change("E-9", at(15), "SETTLED", "CANCELLED")
 
-    result = state_as_of([HISTORY[0], broken_later], at(9, 30))
-
-    assert result is not None
-    assert result.state == "ALLOCATED"
+    with pytest.raises(InvalidModel, match="doesn't join up: E-9 starts from 'SETTLED'"):
+        state_as_of([HISTORY[0], broken_later], at(9, 30))
 
 
 def test_an_event_that_leaves_no_state_is_refused() -> None:
