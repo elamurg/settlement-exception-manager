@@ -2,10 +2,11 @@
 
 import pytest
 
-from settlement.domain.models import BreakType
+from settlement.domain.models import BreakType, ResolutionStatus
 from settlement.evaluation.metrics import (
     Ratio,
     TypeAccuracy,
+    acceptance_rate,
     classification_by_type,
     false_break_rate,
     match_rate,
@@ -123,3 +124,24 @@ def test_one_break_has_no_pairs_to_order() -> None:
 def test_queues_must_hold_the_same_breaks(ranked: list[str]) -> None:
     with pytest.raises(ValueError, match="same break ids"):
         prioritisation_quality(ranked, ["A", "B", "C"])
+
+
+# Acceptance. Worked example:
+#   APPROVED, APPROVED, REJECTED, AMENDED, PROPOSED
+#   decided: the first four; approved as proposed: 2  -> 2 / 4
+
+
+def test_acceptance_rate() -> None:
+    statuses = [
+        ResolutionStatus.APPROVED,
+        ResolutionStatus.APPROVED,
+        ResolutionStatus.REJECTED,
+        ResolutionStatus.AMENDED,
+        ResolutionStatus.PROPOSED,
+    ]
+
+    assert acceptance_rate(statuses) == Ratio(2, 4)
+
+
+def test_nothing_decided_yet_has_no_acceptance_rate() -> None:
+    assert acceptance_rate([ResolutionStatus.PROPOSED]).value is None

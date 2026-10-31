@@ -12,7 +12,7 @@ from collections.abc import Sequence, Set
 from dataclasses import dataclass
 from itertools import combinations
 
-from settlement.domain.models import BreakType
+from settlement.domain.models import BreakType, ResolutionStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,3 +85,13 @@ def prioritisation_quality(ranked: Sequence[str], ideal: Sequence[str]) -> Ratio
     pairs = list(combinations(ideal, 2))  # each pair (first, second) is in the ideal order
     in_order = sum(1 for first, second in pairs if position[first] < position[second])
     return Ratio(in_order, len(pairs))
+
+
+def acceptance_rate(statuses: Sequence[ResolutionStatus]) -> Ratio:
+    """Of the proposals an operator has decided on, how many were approved as proposed.
+
+    AMENDED counts against: the operator had to change it first. PROPOSED is left out,
+    because nobody has decided yet.
+    """
+    decided = [status for status in statuses if status != ResolutionStatus.PROPOSED]
+    return Ratio(decided.count(ResolutionStatus.APPROVED), len(decided))
