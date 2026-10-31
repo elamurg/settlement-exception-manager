@@ -1,5 +1,7 @@
 """Tests for the evaluation metrics (SE-17). Every expected number is worked out by hand."""
 
+from decimal import Decimal
+
 import pytest
 
 from settlement.domain.models import BreakType, ResolutionStatus
@@ -8,6 +10,7 @@ from settlement.evaluation.metrics import (
     TypeAccuracy,
     acceptance_rate,
     classification_by_type,
+    cost_per_break,
     false_break_rate,
     match_rate,
     prioritisation_quality,
@@ -145,3 +148,34 @@ def test_acceptance_rate() -> None:
 
 def test_nothing_decided_yet_has_no_acceptance_rate() -> None:
     assert acceptance_rate([ResolutionStatus.PROPOSED]).value is None
+
+
+# Cost. Worked examples:
+#   0.30 / 4 = 0.075    -> 0.0750
+#   1.00 / 3 = 0.33333… -> 0.3333
+#   0.00025 / 1         -> 0.0003   (exactly half: rounds up, not to the even 0.0002)
+
+
+@pytest.mark.parametrize(
+    ("total", "breaks", "expected"),
+    [
+        (Decimal("0.30"), 4, Decimal("0.0750")),
+        (Decimal("1.00"), 3, Decimal("0.3333")),
+        (Decimal("0.00025"), 1, Decimal("0.0003")),
+    ],
+)
+def test_cost_per_break(total: Decimal, breaks: int, expected: Decimal) -> None:
+    assert cost_per_break(total, breaks) == expected
+
+
+def test_no_breaks_has_no_cost_per_break() -> None:
+    assert cost_per_break(Decimal("0.30"), 0) is None
+
+
+@pytest.mark.parametrize(
+    "total",
+    [0.30, Decimal("-0.01"), Decimal("NaN")],  # a float, negative, not a number
+)
+def test_cost_must_be_a_finite_non_negative_decimal(total: object) -> None:
+    with pytest.raises(ValueError, match="finite, non-negative Decimal"):
+        cost_per_break(total, 4)  # type: ignore[arg-type]

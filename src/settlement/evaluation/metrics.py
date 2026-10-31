@@ -10,9 +10,12 @@ money, so it stays Decimal.
 
 from collections.abc import Sequence, Set
 from dataclasses import dataclass
+from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 
 from settlement.domain.models import BreakType, ResolutionStatus
+
+_COST_PLACES = Decimal("0.0001")  # a hundredth of a cent: one model call costs less than a cent
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,3 +98,14 @@ def acceptance_rate(statuses: Sequence[ResolutionStatus]) -> Ratio:
     """
     decided = [status for status in statuses if status != ResolutionStatus.PROPOSED]
     return Ratio(decided.count(ResolutionStatus.APPROVED), len(decided))
+
+
+def cost_per_break(total_cost: Decimal, breaks: int) -> Decimal | None:
+    """Average cost of handling one break, rounded half up. None if there were no breaks."""
+    if not isinstance(total_cost, Decimal) or not total_cost.is_finite() or total_cost < 0:
+        raise ValueError("total_cost must be a finite, non-negative Decimal")
+    if breaks < 0:
+        raise ValueError("breaks must not be negative")
+    if breaks == 0:
+        return None
+    return (total_cost / breaks).quantize(_COST_PLACES, rounding=ROUND_HALF_UP)
