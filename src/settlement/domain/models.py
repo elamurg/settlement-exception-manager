@@ -350,6 +350,9 @@ class AuditEvent:
     occurred_at: datetime
     before: str | None = None
     after: str | None = None
+    # Position in this record's history: 1, 2, 3... in the order the audit store wrote
+    # them. None until stored. Orders events that share a timestamp.
+    sequence: int | None = None
 
     def __post_init__(self) -> None:
         require_text("event_id", self.event_id)
@@ -358,3 +361,10 @@ class AuditEvent:
         require_text("event_type", self.event_type)
         require_text("actor", self.actor)
         require_aware("occurred_at", self.occurred_at)
+        if self.sequence is not None and (
+            # bool is a subclass of int, so True would otherwise pass as 1.
+            isinstance(self.sequence, bool)
+            or not isinstance(self.sequence, int)
+            or self.sequence < 1
+        ):
+            raise InvalidModel("sequence must be a whole number, 1 or more.")

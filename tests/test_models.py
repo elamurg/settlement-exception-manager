@@ -397,6 +397,20 @@ def test_audit_event_records_before_and_after() -> None:
     assert (event.before, event.after) == ("BOOKED", "ALLOCATED")
 
 
+def test_audit_event_has_no_sequence_until_stored() -> None:
+    assert make_audit_event().sequence is None
+
+
+def test_audit_event_sequence_starts_at_one() -> None:
+    assert replace(make_audit_event(), sequence=1).sequence == 1
+
+
+@pytest.mark.parametrize("sequence", [0, -1, True, 1.0, "1"])
+def test_audit_event_sequence_must_be_a_whole_number_from_one(sequence: object) -> None:
+    with pytest.raises(InvalidModel, match="sequence"):
+        replace(make_audit_event(), sequence=sequence)  # type: ignore[arg-type]
+
+
 # Resolution
 
 
