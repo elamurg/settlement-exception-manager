@@ -1,0 +1,414 @@
+# Golden break set v1 (SE-16): the fixed exam every change to the pipeline is marked against.
+#
+# Never edit a released version: copy it to golden/v2/ and change that, so earlier results
+# stay comparable. Every value is quoted, so numbers and dates are read as exact text.
+#
+# Two parts:
+#   generated  the generator's settings. It's reproducible, so these settings plus its
+#              manifest are the answer key for thousands of ordinary breaks.
+#   cases      hand-written hard cases the generator can't make, each with the right answer
+#              and why.
+#
+# Writing a case:
+#   book       trades. Each starts from the standard trade (see golden.py); write only the
+#              fields that differ. trade_id is required.
+#   statement  custodian lines. Each starts as a perfect match for the trade in `reference`;
+#              write only the fields that differ. line_id is optional.
+#   expected   the right answer, not what the engine currently does. Every trade in the case
+#              appears in exactly one of:
+#                clean:      ["T-1", ...]                          should come out clean
+#                breaks:     [{type: "QUANTITY_BREAK", trade: "T-1"}, ...]
+#                unresolved: ["T-1", ...]                          should be left for a human
+#   kind       TWO_CAUSES, REALLY_TWO, CORPORATE_ACTION or MUST_BE_CLEAN
+#   rationale  why that's the right answer. Required.
+
+version: "v1"
+
+generated:
+  trades: "5000"
+  seed: "42"
+
+cases:
+  - id: "two-fields-off"
+    kind: "TWO_CAUSES"
+    title: "Quantity and settlement date both differ"
+    rationale: >
+      The custodian's line differs in two economic fields. It could be one trade with two
+      problems, or a line belonging to a different trade. The engine can't tell which, so a
+      human must look. Calling it "missing" would send ops chasing an instruction that exists.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "900"
+        intended_settlement_date: "2026-10-07"
+    expected:
+      unresolved: ["T-1"]
+
+  - id: "stock-split"
+    kind: "CORPORATE_ACTION"
+    title: "2-for-1 split doubles the quantity, value unchanged"
+    rationale: >
+      We booked 1,000 shares for 150,250.00. The custodian shows 2,000 shares for the same
+      150,250.00: the company split each share into two, so there are twice as many shares
+      at half the price and the total value is unchanged. That unchanged value is the clue.
+      A real quantity error would change the money too (or leave the quantity off by an
+      odd amount). Raising a QUANTITY_BREAK would have ops "fix" a correct position; the
+      right answer is CORPORATE_ACTION, so our booking is adjusted for the split.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "2000"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  # --- MUST_BE_CLEAN: traps for false alarms ---
+
+  - id: "within-tolerance"
+    kind: "MUST_BE_CLEAN"
+    title: "Consideration 3.00 off on a 150,250.00 trade"
+    rationale: >
+      The custodian's amount is 3.00 higher. Under tolerance set v1, EUR allows the greater
+      of 5.00 and 0.01% of our amount (15.025 here), so 3.00 is within tolerance: a rounding
+      or fee difference, not a break. Flagging it would bury ops in noise.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        consideration: "150253.00"
+    expected:
+      clean: ["T-1"]
+
+  - id: "small-trade-absolute-floor"
+    kind: "MUST_BE_CLEAN"
+    title: "4.99 off on a 10,000.00 trade: the 5.00 floor applies"
+    rationale: >
+      On a small trade, 0.01% is only 1.00, so a percentage-only rule would flag a 4.99
+      difference. The EUR rule's absolute floor of 5.00 is there for exactly this: small
+      trades get at least 5.00 of room. 4.99 is inside it, so the trade is clean.
+    book:
+      - trade_id: "T-1"
+        quantity: "100"
+        price: "100.00"
+        consideration: "10000.00"
+    statement:
+      - reference: "T-1"
+        consideration: "10004.99"
+    expected:
+      clean: ["T-1"]
+
+  - id: "same-security-different-trades"
+    kind: "MUST_BE_CLEAN"
+    title: "Two trades in the same security, different quantities"
+    rationale: >
+      Two separate trades in SAP with the same counterparty and date, for 1,000 and 500
+      shares, each with its own matching line. Same security and counterparty is normal
+      business, not a duplicate: the quantities differ, so each pairs with its own line.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+        quantity: "500"
+        consideration: "75125.00"
+    statement:
+      - reference: "T-1"
+      - reference: "T-2"
+    expected:
+      clean: ["T-1", "T-2"]
+
+  - id: "identical-twins-each-matched"
+    kind: "MUST_BE_CLEAN"
+    title: "Two identical trades, and the custodian has both"
+    rationale: >
+      Two genuinely separate trades with identical economics (it happens: the same order
+      filled twice). The custodian has a line for each. Booked twice and settling twice is
+      correct, so both are clean. Only identical trades with ONE line are a duplicate
+      booking; the line references tell the two apart.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+    statement:
+      - reference: "T-1"
+      - reference: "T-2"
+    expected:
+      clean: ["T-1", "T-2"]
+
+  - id: "lowercase-bic"
+    kind: "MUST_BE_CLEAN"
+    title: "Custodian reports our counterparty's BIC in lowercase"
+    rationale: >
+      The custodian wrote "deutdeff" where our SSI says "DEUTDEFF". BICs are case-insensitive
+      codes, so this is the same bank: the parser normalises codes to upper case before
+      comparing. Raising an SSI_MISMATCH here would be a false break caused by formatting.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_bic: "deutdeff"
+    expected:
+      clean: ["T-1"]
+
+  - id: "free-of-payment"
+    kind: "MUST_BE_CLEAN"
+    title: "Free of payment: zero consideration on both sides"
+    rationale: >
+      A free-of-payment (FOP) delivery moves shares with no cash leg, so the consideration
+      is 0.00 on both sides. Zero is correct here, not a missing amount: there's nothing to
+      compare, so no PRICE_BREAK.
+    book:
+      - trade_id: "T-1"
+        settlement_method: "FOP"
+        consideration: "0.00"
+    statement:
+      - reference: "T-1"
+    expected:
+      clean: ["T-1"]
+
+  # --- REALLY_TWO: one trade, two separate problems ---
+
+  - id: "ssi-and-price"
+    kind: "REALLY_TWO"
+    title: "Wrong account and the amount 2% off, on the same trade"
+    rationale: >
+      Everything in the economic key matches, so the trade and line pair up. But the
+      custodian settled against a different account (our SSI on file is stale or theirs is
+      wrong) AND its amount is 2% off, far outside tolerance. These are two independent
+      problems with two different fixes: correct the settlement instructions, and resolve
+      the amount with the counterparty. Reporting only one would leave the other to fail.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_account: "9999999999"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "SSI_MISMATCH"
+          trade: "T-1"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  - id: "near-match-hides-ssi"
+    kind: "REALLY_TWO"
+    title: "Settlement date differs, and the account is wrong too"
+    rationale: >
+      The line is a day late, so it doesn't match exactly and is found as a near match on
+      the date. It ALSO carries a different account. Fixing only the date would leave the
+      trade settling to the wrong account. A second problem must not hide behind the first.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        intended_settlement_date: "2026-10-07"
+        counterparty_account: "9999999999"
+    expected:
+      breaks:
+        - type: "DATE_MISMATCH"
+          trade: "T-1"
+        - type: "SSI_MISMATCH"
+          trade: "T-1"
+
+  - id: "duplicate-with-price-difference"
+    kind: "REALLY_TWO"
+    title: "Booked twice, and the custodian's amount is off too"
+    rationale: >
+      The same trade is on our book twice and the custodian has one line: a duplicate
+      booking, flagged on both bookings so a human picks which to cancel. Separately, that
+      line's amount is 2% off the trade it references (T-1). Cancelling the duplicate
+      wouldn't fix the amount, so both are breaks.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+    statement:
+      - reference: "T-1"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "DUPLICATE_BOOKING"
+          trade: "T-1"
+        - type: "DUPLICATE_BOOKING"
+          trade: "T-2"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  # --- TWO_CAUSES: could be either, so a human decides ---
+
+  - id: "lei-and-quantity"
+    kind: "TWO_CAUSES"
+    title: "Wrong counterparty and wrong quantity"
+    rationale: >
+      The line names a different counterparty AND a different quantity. Either it is our
+      trade with two problems, or it is a different trade with a different counterparty that
+      happens to be in the same security. Those need opposite actions (fix ours vs. ignore
+      theirs), so the engine must not guess: a human decides.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        counterparty_lei: "5493001KJTIIGC8Y1R12"
+        quantity: "900"
+    expected:
+      unresolved: ["T-1"]
+
+  - id: "one-line-two-candidates"
+    kind: "TWO_CAUSES"
+    title: "A line for 1,050 shares, between trades for 1,000 and 1,100"
+    rationale: >
+      Two of our trades differ only in quantity (1,000 and 1,100), and the custodian has one
+      line for 1,050 with an unrecognised reference. It's one quantity difference away from
+      BOTH trades, so either could be the one with the break. Picking one would be a coin
+      toss; both trades go to a human.
+    book:
+      - trade_id: "T-1"
+      - trade_id: "T-2"
+        quantity: "1100"
+        consideration: "165275.00"
+    statement:
+      - reference: "UNKNOWN-REF"
+        quantity: "1050"
+    expected:
+      unresolved: ["T-1", "T-2"]
+
+  - id: "opposite-direction"
+    kind: "TWO_CAUSES"
+    title: "Custodian shows a sell where we booked a buy"
+    rationale: >
+      Same security, counterparty, quantity and date, but the opposite direction. Either
+      one side recorded the direction wrong (a serious error: shares would move the wrong
+      way), or it is an unrelated trade the other way. Calling ours "missing at the
+      custodian" would hide a possible direction error, so a human must look.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        side: "SELL"
+    expected:
+      unresolved: ["T-1"]
+
+  # --- CORPORATE_ACTION: the company changed its shares, nobody made a mistake ---
+
+  - id: "reverse-split"
+    kind: "CORPORATE_ACTION"
+    title: "1-for-10 reverse split: 1,000 shares become 100"
+    rationale: >
+      The opposite of a split: the company combines every 10 shares into 1, usually to
+      raise a low share price. The custodian shows 100 shares for the same 150,250.00. As
+      with a split, the unchanged value is the clue that this is a corporate action, not a
+      quantity break.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "100"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "bonus-issue"
+    kind: "CORPORATE_ACTION"
+    title: "1-for-2 bonus issue: 1,000 shares become 1,500"
+    rationale: >
+      A bonus issue gives shareholders one free share for every two held, so 1,000 becomes
+      1,500. Unlike a 2-for-1 split, the ratio isn't a whole number, which is a good test
+      that "same value, different quantity" is recognised for any ratio, not just doubling.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "1500"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "isin-change"
+    kind: "CORPORATE_ACTION"
+    title: "The security's ISIN changed after a reorganisation"
+    rationale: >
+      After a merger or reorganisation, a security can be re-issued under a new ISIN.
+      Everything else about the line matches our trade: counterparty, quantity, amount,
+      date, reference. A changed ISIN normally means a different security entirely, so
+      this must not be matched as-is; but it isn't "missing" either. It's a corporate
+      action: our booking needs moving to the new ISIN.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        isin: "GB00B03MLX29"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+
+  - id: "split-and-price-off"
+    kind: "REALLY_TWO"
+    title: "A 2-for-1 split, and the amount is 2% off as well"
+    rationale: >
+      The quantity doubled (a split), but this time the amount also differs by 2%. The
+      split explains the quantity but not the money, so there are two things to resolve:
+      adjust the booking for the split, and query the amount. The "unchanged value" clue
+      doesn't hold here, which is exactly why both must be reported.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "T-1"
+        quantity: "2000"
+        consideration: "153255.00"
+    expected:
+      breaks:
+        - type: "CORPORATE_ACTION"
+          trade: "T-1"
+        - type: "PRICE_BREAK"
+          trade: "T-1"
+
+  # --- more MUST_BE_CLEAN traps ---
+
+  - id: "friday-to-monday"
+    kind: "MUST_BE_CLEAN"
+    title: "Traded on a Friday, settles on Monday"
+    rationale: >
+      T+1 counts business days, so a Friday trade settles on Monday, not Saturday. Both
+      sides say Monday. A system counting calendar days would expect Saturday and raise a
+      false date break.
+    book:
+      - trade_id: "T-1"
+        trade_date: "2026-10-09"
+        intended_settlement_date: "2026-10-12"
+    statement:
+      - reference: "T-1"
+    expected:
+      clean: ["T-1"]
+
+  - id: "gbp-within-tolerance"
+    kind: "MUST_BE_CLEAN"
+    title: "A sterling trade 10.00 off, within the GBP tolerance"
+    rationale: >
+      A UK security settling in GBP. The custodian's amount is 10.00 higher; the GBP rule
+      allows the greater of 5.00 and 0.01% (15.025 here), so it's within tolerance. Checks
+      that the tolerance for the trade's own currency is used, not only EUR's.
+    book:
+      - trade_id: "T-1"
+        isin: "GB0002634946"
+        currency: "GBP"
+    statement:
+      - reference: "T-1"
+        consideration: "150260.00"
+    expected:
+      clean: ["T-1"]
+
+  - id: "reference-missing-but-unique"
+    kind: "MUST_BE_CLEAN"
+    title: "The custodian lost our reference, but the trade is unmistakable"
+    rationale: >
+      Custodians sometimes drop or mangle our reference. Here every economic field matches
+      exactly and there is only one candidate, so the reference isn't needed: matching is
+      on the economic key. Treating a missing reference as a break would be noise.
+    book:
+      - trade_id: "T-1"
+    statement:
+      - reference: "NO-REF"
+    expected:
+      clean: ["T-1"]
