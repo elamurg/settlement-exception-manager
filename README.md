@@ -2,7 +2,20 @@
 
 An intraday reconciliation and exception management system for securities settlement. Deterministic matching and lifecycle control at the core, LangGraph agents for classification and resolution drafting, and a human approval gate before anything is amended.
 
-> **Status:** in development. This README describes the target system and is written before the code. Sections marked _(planned)_ aren't built yet.
+> **Status:** in development. The deterministic core is built and tested: domain model, lifecycle and fail penalties, a synthetic data generator, parsers for CSV files and ISO 15022 messages, and reconciliation (exact match, tolerances, fuzzy pass). The agents, approval workflow and deployment come next. Sections marked _(planned)_ aren't built yet.
+
+## Running it
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+
+python -m settlement.generation --trades 5000 --seed 42           # trade book, custodian statement, manifest of injected breaks
+python -m settlement.evaluation.baseline --trades 5000 --seed 42  # reconcile them and score against the manifest
+pytest                                                            # the test suite
+```
+
+`docker compose up` starts the app with PostgreSQL, Redis and MongoDB (copy `.env.example` to `.env` first).
 
 ---
 
@@ -106,7 +119,11 @@ src/settlement/
 │   ├── models.py              Trade, Allocation, Instruction, StatementLine,
 │   │                          Break, Resolution, AuditEvent, Party, SSI
 │   ├── lifecycle.py           the state machine — legal transitions only
-│   ├── matching.py            economic key, tolerance evaluation (pure)
+│   ├── identifiers.py         ISIN and LEI, check digits validated
+│   ├── matching.py            economic key, exact pass (pure)
+│   ├── tolerance.py           versioned tolerance rules (pure)
+│   ├── fuzzy.py               near matches into typed breaks (pure)
+│   ├── attribution.py         which leg a break is on: book/custodian or CSD
 │   ├── ageing.py              time-to-deadline, priority, escalation
 │   ├── penalties.py           fail penalty accrual — Decimal, explicit rounding
 │   └── controls.py            maker-checker and segregation rules
@@ -114,10 +131,11 @@ src/settlement/
 ├── ingestion/               EDGE
 │   ├── book.py                internal trade feed
 │   ├── custodian.py           custodian statement parsing
-│   └── messages.py            ISO 15022 / ISO 20022 parsing
+│   └── messages.py            ISO 15022 parsing: MT541/543, MT548
 │
 ├── reconciliation/          EDGE — orchestrates the pure matcher
 │   ├── engine.py              exact pass, tolerance pass, fuzzy pass
+│   ├── tolerances.py          loads versioned tolerance sets from YAML
 │   └── report.py              matched, unmatched, break set
 │
 ├── agents/                  EDGE
@@ -167,11 +185,21 @@ Being able to explain the break distribution and why it was chosen demonstrates 
 
 ---
 
-## Evaluation _(planned)_
+## Evaluation
 
-**Golden break set.** Generated breaks with known injected causes, plus hand-written hard cases: two plausible causes at once, a break that is actually two breaks, and clean trades that must produce nothing.
+**Baseline (built).** The generator injects breaks at known rates and records each one in a manifest; the full pipeline (generator → CSV files → parsers → reconciliation) is then scored against it. On 5,000 trades, seed 42, tolerance set v1:
 
-**Metrics.**
+| Metric | Value |
+|---|---|
+| Match rate | **99.51%** (4,460 / 4,482 clean trades) |
+| False break rate | **0.04%** (2 / 4,482) |
+| Breaks found with the right type | **84.94%** (440 / 518) |
+
+Details, per-type numbers and analysis in [`docs/evaluation/baseline.md`](docs/evaluation/baseline.md).
+
+**Golden break set** _(planned)_**.** Generated breaks with known injected causes, plus hand-written hard cases: two plausible causes at once, a break that is actually two breaks, and clean trades that must produce nothing.
+
+**Metrics** _(planned: match rate and false break rate are built)_**.**
 
 | Metric | What it measures |
 |---|---|
@@ -184,7 +212,7 @@ Being able to explain the break distribution and why it was chosen demonstrates 
 
 False break rate matters most. An ops team that stops trusting the queue is worse off than one with no system.
 
-**Regression gate.** CI fails on any degradation past threshold when a prompt or agent changes.
+**Regression gate** _(planned)_**.** CI fails on any degradation past threshold when a prompt or agent changes.
 
 ---
 
@@ -209,10 +237,10 @@ Message formats referenced: ISO 15022 MT messages (541 and 543 instructions, 544
 
 ## Roadmap
 
-- [ ] Domain core and lifecycle state machine
-- [ ] Synthetic data generator
-- [ ] Reconciliation engine
-- [ ] Evaluation harness and golden break set
+- [x] Domain core and lifecycle state machine
+- [x] Synthetic data generator
+- [x] Reconciliation engine
+- [ ] Evaluation harness and golden break set (baseline recorded; golden set next)
 - [ ] Classification and investigation agents
 - [ ] LangGraph pipeline with deterministic routing
 - [ ] Maker-checker approval workflow

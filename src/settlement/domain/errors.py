@@ -23,3 +23,7 @@ class InvalidPenaltyInput(DomainError):
 
 class InvalidMatchInput(DomainError):
     """Raised when matching input is unusable (like when a trade appears twice)"""
+
+
+class ControlViolation(DomainError):
+    """Raised when an action would break a financial control, e.g. approving your own proposal."""
