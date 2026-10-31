@@ -6,7 +6,6 @@ after `docker compose up`:
     export DATABASE_URL=postgresql://settlement:settlement-dev@localhost:5432/settlement
 """
 
-import os
 from collections.abc import Iterator
 from typing import Any
 
@@ -26,11 +25,8 @@ FIND_FLOAT_COLUMNS = """
 
 
 @pytest.fixture
-def conn() -> Iterator[psycopg.Connection[TupleRow]]:
-    url = os.environ.get("DATABASE_URL")
-    if not url:
-        pytest.skip("DATABASE_URL not set; start Postgres with docker compose to run this")
-    with psycopg.connect(url) as connection:
+def conn(database_url: str) -> Iterator[psycopg.Connection[TupleRow]]:
+    with psycopg.connect(database_url) as connection:
         yield connection
         connection.rollback()
 

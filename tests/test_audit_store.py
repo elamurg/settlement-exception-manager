@@ -5,7 +5,6 @@ Skipped unless MONGO_URL is set. Locally, with docker compose running:
     export MONGO_URL=mongodb://settlement:settlement-dev@localhost:27017
 """
 
-import os
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
@@ -23,12 +22,9 @@ from settlement.storage.errors import AuditStoreError
 
 
 @pytest.fixture
-def collection() -> Iterator[Collection[dict[str, Any]]]:
+def collection(mongo_url: str) -> Iterator[Collection[dict[str, Any]]]:
     """A fresh, empty collection in a throwaway database, dropped afterwards."""
-    url = os.environ.get("MONGO_URL")
-    if not url:
-        pytest.skip("MONGO_URL not set; start MongoDB with docker compose to run this")
-    client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
+    client: MongoClient[dict[str, Any]] = MongoClient(mongo_url, tz_aware=True)
     database = f"test_audit_{uuid.uuid4().hex[:8]}"
     set_up_collection(client[database])
     yield client[database][COLLECTION]

@@ -1,5 +1,3 @@
-import os
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -8,10 +6,8 @@ from settlement.api.app import app
 client = TestClient(app)
 
 
+@pytest.mark.usefixtures("database_url")  # the app reads DATABASE_URL itself
 def test_health_ok_when_database_reachable() -> None:
-    if not os.environ.get("DATABASE_URL"):
-        pytest.skip("DATABASE_URL not set; start Postgres with docker compose to run this")
-
     response = client.get("/health")
 
     assert response.status_code == 200

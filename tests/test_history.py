@@ -5,7 +5,6 @@ real lifecycle, stores every event in MongoDB, and rebuilds its status at past m
 the ticket's "Done when".
 """
 
-import os
 import uuid
 from collections.abc import Iterator
 from dataclasses import replace
@@ -171,11 +170,8 @@ def test_moment_must_have_a_timezone() -> None:
 
 
 @pytest.fixture
-def store() -> Iterator[AuditStore]:
-    url = os.environ.get("MONGO_URL")
-    if not url:
-        pytest.skip("MONGO_URL not set; start MongoDB with docker compose to run this")
-    client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
+def store(mongo_url: str) -> Iterator[AuditStore]:
+    client: MongoClient[dict[str, Any]] = MongoClient(mongo_url, tz_aware=True)
     database = f"test_history_{uuid.uuid4().hex[:8]}"
     yield AuditStore(client[database][COLLECTION])
     client.drop_database(database)

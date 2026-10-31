@@ -4,7 +4,6 @@ MONGO_URL must be an admin login (the root user from docker compose). Each test 
 throwaway database, role and user, and removes them afterwards.
 """
 
-import os
 import uuid
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -26,11 +25,8 @@ PASSWORD = "writer-test"
 
 
 @pytest.fixture
-def admin() -> Iterator[MongoClient[dict[str, Any]]]:
-    url = os.environ.get("MONGO_URL")
-    if not url:
-        pytest.skip("MONGO_URL not set; start MongoDB with docker compose to run this")
-    client: MongoClient[dict[str, Any]] = MongoClient(url, tz_aware=True)
+def admin(mongo_url: str) -> Iterator[MongoClient[dict[str, Any]]]:
+    client: MongoClient[dict[str, Any]] = MongoClient(mongo_url, tz_aware=True)
     yield client
     client.close()
 
@@ -48,9 +44,11 @@ def database(admin: MongoClient[dict[str, Any]]) -> Iterator[Database[dict[str, 
 
 
 @pytest.fixture
-def writer(database: Database[dict[str, Any]]) -> Iterator[Collection[dict[str, Any]]]:
+def writer(
+    database: Database[dict[str, Any]], mongo_url: str
+) -> Iterator[Collection[dict[str, Any]]]:
     """The audit collection, as seen by the append-only user."""
-    ((host, port),) = parse_uri(os.environ["MONGO_URL"])["nodelist"]
+    ((host, port),) = parse_uri(mongo_url)["nodelist"]
     client: MongoClient[dict[str, Any]] = MongoClient(
         host=host,
         port=port,
