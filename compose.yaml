@@ -50,7 +50,7 @@ services:
       retries: 10
 
   mongo:
-    image: mongo:8
+    image: mongo:7.0  # same version as CI
     environment:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?copy .env.example to .env}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?copy .env.example to .env}

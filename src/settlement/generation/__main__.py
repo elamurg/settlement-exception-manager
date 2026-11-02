@@ -8,6 +8,7 @@ from pathlib import Path
 from settlement.generation.files import write_all
 from settlement.generation.generator import (
     DEFAULT_BREAK_RATES,
+    DEFAULT_COUNTERPARTY_BREAK_RATE,
     DEFAULT_TRADE_DATE,
     GenerationConfig,
     generate,
@@ -35,12 +36,22 @@ def main(argv: Sequence[str] | None = None) -> None:
         default=None,
         help="share of trades with a break, keeping the default mix of types (default 0.10)",
     )
+    parser.add_argument(
+        "--counterparty-break-rate",
+        type=float,
+        default=DEFAULT_COUNTERPARTY_BREAK_RATE,
+        help="share of clean trades the counterparty disagrees on at the CSD (default 0.03)",
+    )
     args = parser.parse_args(argv)
 
     rates = DEFAULT_BREAK_RATES if args.break_rate is None else scaled_rates(args.break_rate)
     try:
         config = GenerationConfig(
-            trades=args.trades, seed=args.seed, trade_date=args.trade_date, break_rates=rates
+            trades=args.trades,
+            seed=args.seed,
+            trade_date=args.trade_date,
+            break_rates=rates,
+            counterparty_break_rate=args.counterparty_break_rate,
         )
     except ValueError as error:
         parser.error(str(error))
@@ -49,8 +60,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     write_all(data, args.out)
 
     print(
-        f"Wrote {len(data.book)} book rows, {len(data.statement)} statement lines "
-        f"and {len(data.breaks)} injected breaks to {args.out}/"
+        f"Wrote {len(data.book)} book rows, {len(data.statement)} statement lines, "
+        f"{len(data.statuses)} statuses, {len(data.breaks)} injected breaks and "
+        f"{len(data.counterparty_breaks)} counterparty breaks to {args.out}/"
     )
 
 
