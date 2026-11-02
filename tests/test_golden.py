@@ -21,6 +21,7 @@ version: "v1"
 generated:
   trades: "100"
   seed: "1"
+  generator_version: "1"
 cases:
 """
 
@@ -196,6 +197,16 @@ def test_bad_expected_answers_are_refused(expected: str, message: str) -> None:
         ),
         pytest.param(
             ('seed: "1"', 'seed: "one"'), "generated.seed must be a whole number", id="bad_seed"
+        ),
+        pytest.param(
+            ('generator_version: "1"', 'generator_version: "2"'),
+            "but the generator is version '1'",
+            id="other_generator_version",
+        ),
+        pytest.param(
+            ('  generator_version: "1"\n', ""),
+            "generated: missing generator_version",
+            id="no_generator_version",
         ),
     ],
 )

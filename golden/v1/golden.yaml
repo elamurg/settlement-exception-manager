@@ -27,6 +27,7 @@ version: "v1"
 generated:
   trades: "5000"
   seed: "42"
+  generator_version: "1"  # a seed only reproduces the same trades with the same generator
 
 cases:
   - id: "two-fields-off"

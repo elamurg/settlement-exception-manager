@@ -18,7 +18,7 @@ import yaml
 
 from settlement.domain.errors import DomainError
 from settlement.domain.models import BreakType, StatementLine
-from settlement.generation.generator import GenerationConfig
+from settlement.generation.generator import GENERATOR_VERSION, GenerationConfig
 from settlement.ingestion.book import BOOK_COLUMNS, BookEntry, parse_book
 from settlement.ingestion.custodian import (
     OPTIONAL_STATEMENT_COLUMNS,
@@ -64,7 +64,7 @@ _COPIED_FROM_TRADE = (
 )
 
 _TOP_KEYS = {"version", "generated", "cases"}
-_GENERATED_KEYS = {"trades", "seed"}
+_GENERATED_KEYS = {"trades", "seed", "generator_version"}
 _CASE_KEYS = {"id", "kind", "title", "rationale", "book", "statement", "expected"}
 _EXPECTED_KEYS = {"clean", "breaks", "unresolved"}
 _BREAK_KEYS = {"type", "trade"}
@@ -138,6 +138,14 @@ def parse_golden_set(text: str, source: str = "golden.yaml") -> GoldenSet:
 
     generated = _mapping(data["generated"], source, "generated")
     _require_keys(generated, _GENERATED_KEYS, set(), source, "generated")
+    version = _text(generated["generator_version"], source, "generated.generator_version")
+    if version != GENERATOR_VERSION:
+        raise GoldenSetError(
+            source,
+            f"generated.generator_version is {version!r}, but the generator is version "
+            f"{GENERATOR_VERSION!r}: the same seed would now make different trades",
+        )
+
     try:
         config = GenerationConfig(
             trades=_integer(generated["trades"], source, "generated.trades"),
