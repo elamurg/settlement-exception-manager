@@ -7,8 +7,10 @@ to exactly the same checks as a real file.
 
 import csv
 import io
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
@@ -16,7 +18,9 @@ from typing import Any
 
 import yaml
 
-from settlement.domain.errors import DomainError
+from settlement.domain.corporate_actions import CorporateAction, CorporateActionType
+from settlement.domain.errors import DomainError, InvalidIdentifier, InvalidModel
+from settlement.domain.identifiers import ISIN
 from settlement.domain.models import BreakType, StatementLine
 from settlement.generation.generator import GENERATOR_VERSION, GenerationConfig
 from settlement.ingestion.book import BOOK_COLUMNS, BookEntry, parse_book
@@ -65,7 +69,12 @@ _COPIED_FROM_TRADE = (
 
 _TOP_KEYS = {"version", "generated", "cases"}
 _GENERATED_KEYS = {"trades", "seed", "generator_version"}
-_CASE_KEYS = {"id", "kind", "title", "rationale", "book", "statement", "expected"}
+_CASE_KEYS = {"id", "kind", "title", "rationale", "book", "expected"}
+_OPTIONAL_CASE_KEYS = {"statement", "corporate_actions"}
+_ACTION_KEYS = {"type", "isin", "effective_date"}
+_OPTIONAL_ACTION_KEYS = {"new_shares", "old_shares", "new_isin"}
+# date.fromisoformat also accepts 20261006; only YYYY-MM-DD is allowed, as in SE-08.
+_ISO_DATE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")
 _EXPECTED_KEYS = {"clean", "breaks", "unresolved", "unresolved_lines"}
 _BREAK_KEYS = {"type", "trade"}
 
@@ -113,6 +122,7 @@ class GoldenCase:
     book: tuple[BookEntry, ...]
     statement: tuple[StatementLine, ...]
     expected: Expected
+    corporate_actions: tuple[CorporateAction, ...] = ()  # notices the engine is given
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +187,7 @@ def parse_golden_set(text: str, source: str = "golden.yaml") -> GoldenSet:
 
 def _parse_case(raw: Any, source: str, where: str) -> GoldenCase:
     case = _mapping(raw, source, where)
-    _require_keys(case, _CASE_KEYS - {"statement"}, {"statement"}, source, where)
+    _require_keys(case, _CASE_KEYS, _OPTIONAL_CASE_KEYS, source, where)
     case_id = _text(case["id"], source, f"{where}.id")
     where = f"{where} ({case_id})"
 
@@ -203,6 +213,11 @@ def _parse_case(raw: Any, source: str, where: str) -> GoldenCase:
         statement=statement,
         expected=_parse_expected(
             case["expected"], set(trades), {line.line_id for line in statement}, source, where
+        ),
+        corporate_actions=_parse_corporate_actions(
+            _list(case.get("corporate_actions", []), source, f"{where}.corporate_actions"),
+            source,
+            where,
         ),
     )
 
@@ -236,6 +251,35 @@ def _parse_statement(
         line |= {"line_id": f"L-{number}", "source": "custodian"}
         full_rows.append(line | row)
     return _read(parse_statement, columns, full_rows, source, f"{where}.statement")
+
+
+def _parse_corporate_actions(
+    rows: list[Any], source: str, where: str
+) -> tuple[CorporateAction, ...]:
+    actions = []
+    for number, raw in enumerate(rows, 1):
+        here = f"{where}.corporate_actions[{number}]"
+        row = _mapping(raw, source, here)
+        _require_keys(row, _ACTION_KEYS, _OPTIONAL_ACTION_KEYS, source, here)
+        try:
+            actions.append(
+                CorporateAction(
+                    action_type=CorporateActionType(_text(row["type"], source, f"{here}.type")),
+                    isin=ISIN(_text(row["isin"], source, f"{here}.isin")),
+                    effective_date=_date(row["effective_date"], source, f"{here}.effective_date"),
+                    new_shares=_optional_integer(row, "new_shares", source, here),
+                    old_shares=_optional_integer(row, "old_shares", source, here),
+                    new_isin=(
+                        ISIN(_text(row["new_isin"], source, f"{here}.new_isin"))
+                        if "new_isin" in row
+                        else None
+                    ),
+                )
+            )
+        except (ValueError, InvalidIdentifier, InvalidModel) as error:
+            # A bad type name, ISIN or ratio: say which case and which notice.
+            raise GoldenSetError(source, f"{here}: {error}") from None
+    return tuple(actions)
 
 
 def _parse_expected(
@@ -380,3 +424,17 @@ def _ids(value: Any, source: str, where: str) -> set[str]:
     if len(ids) != len(set(ids)):
         raise GoldenSetError(source, f"{where} lists the same id twice")
     return set(ids)
+
+
+def _date(value: Any, source: str, where: str) -> date:
+    text = _text(value, source, where)
+    try:
+        if not _ISO_DATE.fullmatch(text):
+            raise ValueError
+        return date.fromisoformat(text)  # still refuses impossible dates like 2026-02-30
+    except ValueError:
+        raise GoldenSetError(source, f"{where} must be a date (YYYY-MM-DD), got {text!r}") from None
+
+
+def _optional_integer(row: Mapping[str, Any], key: str, source: str, where: str) -> int | None:
+    return _integer(row[key], source, f"{where}.{key}") if key in row else None

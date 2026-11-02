@@ -1,10 +1,13 @@
 """Tests for loading the golden break set (SE-16)."""
 
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from settlement.domain.corporate_actions import CorporateAction, CorporateActionType
+from settlement.domain.identifiers import ISIN
 from settlement.domain.models import BreakType
 from settlement.evaluation.golden import (
     GOLDEN_V1,
@@ -253,3 +256,60 @@ def test_case_kinds_match_the_ticket() -> None:
         "CORPORATE_ACTION",
         "MUST_BE_CLEAN",
     }
+
+
+# Corporate action notices
+
+SPLIT_NOTICE = (
+    "    corporate_actions:\n"
+    '      - type: "SPLIT"\n'
+    '        isin: "DE0007164600"\n'
+    '        effective_date: "2026-10-06"\n'
+    '        new_shares: "2"\n'
+    '        old_shares: "1"\n'
+)
+
+
+def test_a_case_can_carry_a_corporate_action_notice() -> None:
+    (case,) = parse_golden_set(one_case(SPLIT_NOTICE)).cases
+
+    assert case.corporate_actions == (
+        CorporateAction(
+            action_type=CorporateActionType.SPLIT,
+            isin=ISIN("DE0007164600"),
+            effective_date=date(2026, 10, 6),
+            new_shares=2,
+            old_shares=1,
+        ),
+    )
+
+
+def test_a_case_without_notices_has_none() -> None:
+    (case,) = parse_golden_set(one_case("")).cases
+
+    assert case.corporate_actions == ()
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        pytest.param(('"SPLIT"', '"MERGER"'), "'MERGER' is not a valid", id="unknown_type"),
+        pytest.param(
+            ('"2026-10-06"', '"20261006"'), "must be a date \\(YYYY-MM-DD\\)", id="compact_date"
+        ),
+        pytest.param(('new_shares: "2"', 'new_shares: "1"'), "leaves more shares", id="no_change"),
+        pytest.param(
+            ('        old_shares: "1"\n', ""), "old_shares must be a whole", id="no_ratio"
+        ),
+        pytest.param(
+            ('old_shares: "1"', 'old_shares: "1"\n        ratio: "2"'),
+            "unknown ratio",
+            id="unknown_field",
+        ),
+    ],
+)
+def test_bad_corporate_action_notices_are_refused(change: tuple[str, str], message: str) -> None:
+    old, new = change
+
+    with pytest.raises(GoldenSetError, match=r"corporate_actions\[1\].*" + message):
+        parse_golden_set(one_case(SPLIT_NOTICE.replace(old, new)))
