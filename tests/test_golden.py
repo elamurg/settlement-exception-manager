@@ -143,7 +143,9 @@ def test_expected_breaks_and_outcomes() -> None:
             id="unknown_trade",
         ),
         pytest.param(
-            '    expected:\n      clean: ["T-1", "T-1"]\n', "lists a trade twice", id="listed_twice"
+            '    expected:\n      clean: ["T-1", "T-1"]\n',
+            "lists the same id twice",
+            id="listed_twice",
         ),
         pytest.param(
             '    expected:\n      breaks:\n        - type: "WRONG"\n          trade: "T-1"\n',
@@ -158,6 +160,11 @@ def test_expected_breaks_and_outcomes() -> None:
             id="break_listed_twice",
         ),
         pytest.param(
+            '    expected:\n      clean: ["T-1"]\n      unresolved_lines: ["L-9"]\n',
+            "mentions 'L-9', which isn't in the statement",
+            id="unknown_line",
+        ),
+        pytest.param(
             '    expected:\n      clena: ["T-1"]\n', "unknown clena", id="misspelt_outcome"
         ),
     ],
@@ -165,6 +172,16 @@ def test_expected_breaks_and_outcomes() -> None:
 def test_bad_expected_answers_are_refused(expected: str, message: str) -> None:
     with pytest.raises(GoldenSetError, match=message):
         parse_golden_set(one_case("", expected))
+
+
+def test_a_line_nobody_booked_can_be_left_for_a_human() -> None:
+    """They have it, we don't: L-2's reference isn't any trade of ours."""
+    statement = '    statement:\n      - reference: "T-1"\n      - reference: "NEVER-BOOKED"\n'
+    expected = '    expected:\n      clean: ["T-1"]\n      unresolved_lines: ["L-2"]\n'
+
+    (case,) = parse_golden_set(one_case(statement, expected)).cases
+
+    assert case.expected.unresolved_lines == frozenset({"L-2"})
 
 
 # Never a silent skip

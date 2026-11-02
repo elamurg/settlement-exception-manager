@@ -19,6 +19,8 @@
 #                clean:      ["T-1", ...]                          should come out clean
 #                breaks:     [{type: "QUANTITY_BREAK", trade: "T-1"}, ...]
 #                unresolved: ["T-1", ...]                          should be left for a human
+#              and, for custodian lines nobody booked (line ids are L-1, L-2... in order):
+#                unresolved_lines: ["L-2", ...]                    should be left for a human
 #   kind       TWO_CAUSES, REALLY_TWO, CORPORATE_ACTION or MUST_BE_CLEAN
 #   rationale  why that's the right answer. Required.
 

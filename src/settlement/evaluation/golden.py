@@ -66,7 +66,7 @@ _COPIED_FROM_TRADE = (
 _TOP_KEYS = {"version", "generated", "cases"}
 _GENERATED_KEYS = {"trades", "seed", "generator_version"}
 _CASE_KEYS = {"id", "kind", "title", "rationale", "book", "statement", "expected"}
-_EXPECTED_KEYS = {"clean", "breaks", "unresolved"}
+_EXPECTED_KEYS = {"clean", "breaks", "unresolved", "unresolved_lines"}
 _BREAK_KEYS = {"type", "trade"}
 
 
@@ -99,6 +99,9 @@ class Expected:
     clean: frozenset[str]
     breaks: tuple[ExpectedBreak, ...]
     unresolved: frozenset[str]
+    unresolved_lines: frozenset[str] = (
+        frozenset()
+    )  # custodian lines nobody booked: left for a human
 
 
 @dataclass(frozen=True, slots=True)
@@ -198,7 +201,9 @@ def _parse_case(raw: Any, source: str, where: str) -> GoldenCase:
         rationale=_text(case["rationale"], source, f"{where}.rationale"),
         book=book,
         statement=statement,
-        expected=_parse_expected(case["expected"], set(trades), source, where),
+        expected=_parse_expected(
+            case["expected"], set(trades), {line.line_id for line in statement}, source, where
+        ),
     )
 
 
@@ -233,13 +238,24 @@ def _parse_statement(
     return _read(parse_statement, columns, full_rows, source, f"{where}.statement")
 
 
-def _parse_expected(raw: Any, trade_ids: set[str], source: str, where: str) -> Expected:
+def _parse_expected(
+    raw: Any, trade_ids: set[str], line_ids: set[str], source: str, where: str
+) -> Expected:
     here = f"{where}.expected"
     expected = _mapping(raw, source, here)
     _require_keys(expected, set(), _EXPECTED_KEYS, source, here)
 
-    clean = _trade_ids(expected.get("clean", []), source, f"{here}.clean")
-    unresolved = _trade_ids(expected.get("unresolved", []), source, f"{here}.unresolved")
+    clean = _ids(expected.get("clean", []), source, f"{here}.clean")
+    unresolved = _ids(expected.get("unresolved", []), source, f"{here}.unresolved")
+    unresolved_lines = _ids(
+        expected.get("unresolved_lines", []), source, f"{here}.unresolved_lines"
+    )
+    for line_id in sorted(unresolved_lines):
+        if line_id not in line_ids:
+            raise GoldenSetError(
+                source,
+                f"{here}.unresolved_lines mentions {line_id!r}, which isn't in the statement",
+            )
     breaks = []
     for number, raw_break in enumerate(_list(expected.get("breaks", []), source, here), 1):
         at = f"{here}.breaks[{number}]"
@@ -271,7 +287,12 @@ def _parse_expected(raw: Any, trade_ids: set[str], source: str, where: str) -> E
                 source, f"{here}: {trade_id!r} must be in exactly one outcome, found {found}"
             )
 
-    return Expected(clean=frozenset(clean), breaks=tuple(breaks), unresolved=frozenset(unresolved))
+    return Expected(
+        clean=frozenset(clean),
+        breaks=tuple(breaks),
+        unresolved=frozenset(unresolved),
+        unresolved_lines=frozenset(unresolved_lines),
+    )
 
 
 def _read[T](
@@ -351,11 +372,11 @@ def _integer(value: Any, source: str, where: str) -> int:
     return int(text)
 
 
-def _trade_ids(value: Any, source: str, where: str) -> set[str]:
+def _ids(value: Any, source: str, where: str) -> set[str]:
     ids = [
         _text(item, source, f"{where}[{n}]")
         for n, item in enumerate(_list(value, source, where), 1)
     ]
     if len(ids) != len(set(ids)):
-        raise GoldenSetError(source, f"{where} lists a trade twice")
+        raise GoldenSetError(source, f"{where} lists the same id twice")
     return set(ids)
