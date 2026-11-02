@@ -4,7 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from settlement.domain.models import BreakType, ResolutionStatus
+from settlement.domain.controls import ReasonCode, amend, approve, reject
+from settlement.domain.models import BreakType, Resolution, ResolutionAction
 from settlement.evaluation.metrics import (
     Ratio,
     TypeAccuracy,
@@ -129,25 +130,49 @@ def test_queues_must_hold_the_same_breaks(ranked: list[str]) -> None:
         prioritisation_quality(ranked, ["A", "B", "C"])
 
 
-# Acceptance. Worked example:
-#   APPROVED, APPROVED, REJECTED, AMENDED, PROPOSED
-#   decided: the first four; approved as proposed: 2  -> 2 / 4
+# Acceptance. Worked example, each built with the real SE-14 controls:
+#   R1  approved as proposed           accepted
+#   R2  rejected                       not accepted
+#   R3  amended, waiting for approval  not accepted
+#   R4  amended, then approved         not accepted: ends APPROVED, but someone changed it
+#   R5  still proposed                 left out: nobody has acted on it
+#   -> 1 / 4
+
+
+def proposal(resolution_id: str) -> Resolution:
+    return Resolution(
+        resolution_id=resolution_id,
+        break_id=f"B-{resolution_id}",
+        action=ResolutionAction.AMEND_SSI,
+        rationale="Custodian has the old safekeeping account.",
+        proposed_by="agent",
+    )
+
+
+def amended(resolution_id: str) -> Resolution:
+    return amend(
+        proposal(resolution_id),
+        amended_by="tina",
+        action=ResolutionAction.REINSTRUCT,
+        rationale="Re-instruct with the corrected SSI.",
+        reason_code=ReasonCode.WRONG_ACTION,
+    )
 
 
 def test_acceptance_rate() -> None:
-    statuses = [
-        ResolutionStatus.APPROVED,
-        ResolutionStatus.APPROVED,
-        ResolutionStatus.REJECTED,
-        ResolutionStatus.AMENDED,
-        ResolutionStatus.PROPOSED,
+    resolutions = [
+        approve(proposal("R1"), approver="tina"),
+        reject(proposal("R2"), checker="tina", reason_code=ReasonCode.WRONG_ACTION),
+        amended("R3"),
+        approve(amended("R4"), approver="ela"),
+        proposal("R5"),
     ]
 
-    assert acceptance_rate(statuses) == Ratio(2, 4)
+    assert acceptance_rate(resolutions) == Ratio(1, 4)
 
 
-def test_nothing_decided_yet_has_no_acceptance_rate() -> None:
-    assert acceptance_rate([ResolutionStatus.PROPOSED]).value is None
+def test_nothing_acted_on_yet_has_no_acceptance_rate() -> None:
+    assert acceptance_rate([proposal("R1")]).value is None
 
 
 # Cost. Worked examples:

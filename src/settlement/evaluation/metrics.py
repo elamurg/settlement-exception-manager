@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from itertools import combinations
 
-from settlement.domain.models import BreakType, ResolutionStatus
+from settlement.domain.models import BreakType, Resolution, ResolutionStatus
 
 _COST_PLACES = Decimal("0.0001")  # a hundredth of a cent: one model call costs less than a cent
 
@@ -90,14 +90,18 @@ def prioritisation_quality(ranked: Sequence[str], ideal: Sequence[str]) -> Ratio
     return Ratio(in_order, len(pairs))
 
 
-def acceptance_rate(statuses: Sequence[ResolutionStatus]) -> Ratio:
-    """Of the proposals an operator has decided on, how many were approved as proposed.
+def acceptance_rate(resolutions: Sequence[Resolution]) -> Ratio:
+    """Of the proposals an operator has acted on, how many were approved exactly as proposed.
 
-    AMENDED counts against: the operator had to change it first. PROPOSED is left out,
-    because nobody has decided yet.
+    An amendment always sets a reason code and approve() keeps it, so an APPROVED resolution
+    with a reason code was amended first: it counts against, like REJECTED or AMENDED.
+    PROPOSED is left out, because nobody has acted on it yet.
     """
-    decided = [status for status in statuses if status != ResolutionStatus.PROPOSED]
-    return Ratio(decided.count(ResolutionStatus.APPROVED), len(decided))
+    acted_on = [r for r in resolutions if r.status != ResolutionStatus.PROPOSED]
+    accepted = sum(
+        1 for r in acted_on if r.status == ResolutionStatus.APPROVED and r.reason_code is None
+    )
+    return Ratio(accepted, len(acted_on))
 
 
 def cost_per_break(total_cost: Decimal, breaks: int) -> Decimal | None:
