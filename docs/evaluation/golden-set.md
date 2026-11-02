@@ -51,7 +51,7 @@ Exact match → tolerance (v1) → fuzzy pass, as on `main` at `4f7ce32`.
 
 The ten failures come from four gaps, each a candidate ticket:
 
-1. **No corporate-action handling** (5 cases). A split, reverse split or bonus issue changes the quantity but not the value; the engine reads it as a quantity break. An ISIN change reads as "missing".
+1. **No corporate-action handling** (5 cases). These cases come with a corporate-action notice (a split, reverse split, bonus issue or ISIN change), but the engine doesn't read notices yet: it reads the split quantities as quantity breaks and the ISIN change as "missing".
 2. **"Missing" when a line exists** (2 cases). When the custodian's line differs in the counterparty or the direction as well, the trade is reported as `UNMATCHED_INSTRUCTION`. A line that could be ours should send the trade to a human, especially a possible direction error.
 3. **A second problem hides behind the first** (2 cases). SSI details are only checked on exact matches, and amounts aren't checked on duplicate groups, so the second break goes unreported.
 4. **Identical trades can't be told apart** (1 case). The `reference` tiebreak discussed in SE-09/SE-11 would fix `identical-twins-each-matched`.

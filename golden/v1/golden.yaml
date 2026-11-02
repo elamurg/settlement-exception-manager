@@ -21,6 +21,13 @@
 #                unresolved: ["T-1", ...]                          should be left for a human
 #              and, for custodian lines nobody booked (line ids are L-1, L-2... in order):
 #                unresolved_lines: ["L-2", ...]                    should be left for a human
+#   corporate_actions
+#              optional notices the engine is given, as ops would get from a data feed:
+#                type: SPLIT, REVERSE_SPLIT or BONUS_ISSUE with new_shares and old_shares
+#                      (for every old_shares held, a holder now has new_shares), or
+#                      ISIN_CHANGE with new_isin; plus isin and effective_date.
+#              A changed quantity with no notice is a quantity break, however neat the
+#              numbers look: the generator's quantity breaks keep the value unchanged too.
 #   kind       TWO_CAUSES, REALLY_TWO, CORPORATE_ACTION or MUST_BE_CLEAN
 #   rationale  why that's the right answer. Required.
 
@@ -53,16 +60,22 @@ cases:
     title: "2-for-1 split doubles the quantity, value unchanged"
     rationale: >
       We booked 1,000 shares for 150,250.00. The custodian shows 2,000 shares for the same
-      150,250.00: the company split each share into two, so there are twice as many shares
-      at half the price and the total value is unchanged. That unchanged value is the clue.
-      A real quantity error would change the money too (or leave the quantity off by an
-      odd amount). Raising a QUANTITY_BREAK would have ops "fix" a correct position; the
-      right answer is CORPORATE_ACTION, so our booking is adjusted for the split.
+      150,250.00, and a notice says the company split each share into two the day before
+      settlement. The notice is the evidence, not the numbers: an ordinary quantity break
+      can also leave the value unchanged, so without it this would be a QUANTITY_BREAK.
+      With it, raising a QUANTITY_BREAK would have ops "fix" a correct position; the right
+      answer is CORPORATE_ACTION, so our booking is adjusted for the split.
     book:
       - trade_id: "T-1"
     statement:
       - reference: "T-1"
         quantity: "2000"
+    corporate_actions:
+      - type: "SPLIT"
+        isin: "DE0007164600"
+        effective_date: "2026-10-06"
+        new_shares: "2"
+        old_shares: "1"
     expected:
       breaks:
         - type: "CORPORATE_ACTION"
@@ -297,14 +310,21 @@ cases:
     title: "1-for-10 reverse split: 1,000 shares become 100"
     rationale: >
       The opposite of a split: the company combines every 10 shares into 1, usually to
-      raise a low share price. The custodian shows 100 shares for the same 150,250.00. As
-      with a split, the unchanged value is the clue that this is a corporate action, not a
-      quantity break.
+      raise a low share price. The custodian shows 100 shares for the same 150,250.00, and
+      a notice announces the 1-for-10 reverse split. As with a split, the notice is what
+      makes this a corporate action rather than a quantity break; it also tests that the
+      ratio is understood in the direction that reduces the holding.
     book:
       - trade_id: "T-1"
     statement:
       - reference: "T-1"
         quantity: "100"
+    corporate_actions:
+      - type: "REVERSE_SPLIT"
+        isin: "DE0007164600"
+        effective_date: "2026-10-06"
+        new_shares: "1"
+        old_shares: "10"
     expected:
       breaks:
         - type: "CORPORATE_ACTION"
@@ -315,13 +335,20 @@ cases:
     title: "1-for-2 bonus issue: 1,000 shares become 1,500"
     rationale: >
       A bonus issue gives shareholders one free share for every two held, so 1,000 becomes
-      1,500. Unlike a 2-for-1 split, the ratio isn't a whole number, which is a good test
-      that "same value, different quantity" is recognised for any ratio, not just doubling.
+      1,500: 3 shares for every 2. Unlike a 2-for-1 split, the ratio doesn't divide evenly
+      into a whole multiplier, which tests that the notice's ratio is applied exactly for
+      any ratio, not just doubling.
     book:
       - trade_id: "T-1"
     statement:
       - reference: "T-1"
         quantity: "1500"
+    corporate_actions:
+      - type: "BONUS_ISSUE"
+        isin: "DE0007164600"
+        effective_date: "2026-10-06"
+        new_shares: "3"
+        old_shares: "2"
     expected:
       breaks:
         - type: "CORPORATE_ACTION"
@@ -331,16 +358,23 @@ cases:
     kind: "CORPORATE_ACTION"
     title: "The security's ISIN changed after a reorganisation"
     rationale: >
-      After a merger or reorganisation, a security can be re-issued under a new ISIN.
-      Everything else about the line matches our trade: counterparty, quantity, amount,
-      date, reference. A changed ISIN normally means a different security entirely, so
-      this must not be matched as-is; but it isn't "missing" either. It's a corporate
-      action: our booking needs moving to the new ISIN.
+      After a merger or reorganisation, a security can be re-issued under a new ISIN, and
+      a notice says this one moved to GB00B03MLX29. Everything else about the line matches
+      our trade: counterparty, quantity, amount, date, reference. A changed ISIN normally
+      means a different security entirely, so this must not be matched as-is; but with the
+      notice it isn't "missing" either. It's a corporate action: our booking needs moving
+      to the new ISIN. Without the notice, the reference alone would be too weak a link
+      (references get dropped and mangled), and the honest answer would be unresolved.
     book:
       - trade_id: "T-1"
     statement:
       - reference: "T-1"
         isin: "GB00B03MLX29"
+    corporate_actions:
+      - type: "ISIN_CHANGE"
+        isin: "DE0007164600"
+        effective_date: "2026-10-06"
+        new_isin: "GB00B03MLX29"
     expected:
       breaks:
         - type: "CORPORATE_ACTION"
@@ -350,16 +384,23 @@ cases:
     kind: "REALLY_TWO"
     title: "A 2-for-1 split, and the amount is 2% off as well"
     rationale: >
-      The quantity doubled (a split), but this time the amount also differs by 2%. The
-      split explains the quantity but not the money, so there are two things to resolve:
-      adjust the booking for the split, and query the amount. The "unchanged value" clue
-      doesn't hold here, which is exactly why both must be reported.
+      The quantity doubled, and a notice announces a 2-for-1 split, but this time the
+      amount also differs by 2%. A split never changes the value of a holding, so the
+      notice explains the quantity but not the money: there are two things to resolve.
+      Adjust the booking for the split, and query the amount. Reporting only the corporate
+      action would hide a real price break behind it.
     book:
       - trade_id: "T-1"
     statement:
       - reference: "T-1"
         quantity: "2000"
         consideration: "153255.00"
+    corporate_actions:
+      - type: "SPLIT"
+        isin: "DE0007164600"
+        effective_date: "2026-10-06"
+        new_shares: "2"
+        old_shares: "1"
     expected:
       breaks:
         - type: "CORPORATE_ACTION"
