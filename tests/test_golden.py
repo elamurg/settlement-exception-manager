@@ -150,6 +150,13 @@ def test_expected_breaks_and_outcomes() -> None:
             id="bad_break_type",
         ),
         pytest.param(
+            "    expected:\n      breaks:\n"
+            '        - type: "PRICE_BREAK"\n          trade: "T-1"\n'
+            '        - type: "PRICE_BREAK"\n          trade: "T-1"\n',
+            "lists PRICE_BREAK on 'T-1' twice",
+            id="break_listed_twice",
+        ),
+        pytest.param(
             '    expected:\n      clena: ["T-1"]\n', "unknown clena", id="misspelt_outcome"
         ),
     ],

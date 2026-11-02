@@ -242,7 +242,12 @@ def _parse_expected(raw: Any, trade_ids: set[str], source: str, where: str) -> E
             break_type = BreakType(type_text)
         except ValueError:
             raise GoldenSetError(source, f"{at}.type {type_text!r} isn't a break type") from None
-        breaks.append(ExpectedBreak(break_type, _text(item["trade"], source, f"{at}.trade")))
+        expected_break = ExpectedBreak(break_type, _text(item["trade"], source, f"{at}.trade"))
+        if expected_break in breaks:
+            raise GoldenSetError(
+                source, f"{at} lists {break_type.value} on {expected_break.trade_id!r} twice"
+            )
+        breaks.append(expected_break)
 
     # Every trade in exactly one outcome: a case can't forget a trade or answer twice.
     broken = {item.trade_id for item in breaks}
