@@ -56,40 +56,42 @@ def test_rates_with_no_clean_trades_have_no_value() -> None:
 
 
 # Classification. Worked example, (actual -> predicted) per trade:
-#   T1  SSI_MISMATCH   -> SSI_MISMATCH     right
-#   T2  SSI_MISMATCH   -> STATIC_DATA      wrong type
-#   T3  QUANTITY_BREAK -> QUANTITY_BREAK   right
-#   T4  QUANTITY_BREAK -> (none)           missed
-#   T5  (none)         -> PRICE_BREAK      false break
-#   T6  (none)         -> (none)           clean, says nothing about any type
+#   T1  {SSI}           -> {SSI}        right
+#   T2  {SSI}           -> {STATIC}     wrong type
+#   T3  {QUANTITY}      -> {QUANTITY}   right
+#   T4  {QUANTITY}      -> {}           missed
+#   T5  {}              -> {PRICE}      false break
+#   T6  {}              -> {}           clean, says nothing about any type
+#   T7  {SSI, PRICE}    -> {SSI}        two real breaks, only one caught
 #
 #                    called  real  correct   precision  recall
-#   SSI_MISMATCH        1      2      1        1/1        1/2
+#   SSI_MISMATCH        2      3      2        2/2        2/3     (T1, T7 called; T1, T2, T7 real)
 #   STATIC_DATA         1      0      0        0/1        0/0
 #   QUANTITY_BREAK      1      2      1        1/1        1/2
-#   PRICE_BREAK         1      0      0        0/1        0/0
+#   PRICE_BREAK         1      1      0        0/1        0/1     (T5 called, T7 real)
 
 SSI = BreakType.SSI_MISMATCH
 STATIC = BreakType.STATIC_DATA
 QUANTITY = BreakType.QUANTITY_BREAK
 PRICE = BreakType.PRICE_BREAK
 
-OUTCOMES = [
-    (SSI, SSI),
-    (SSI, STATIC),
-    (QUANTITY, QUANTITY),
-    (QUANTITY, None),
-    (None, PRICE),
-    (None, None),
+OUTCOMES: list[tuple[set[BreakType], set[BreakType]]] = [
+    ({SSI}, {SSI}),
+    ({SSI}, {STATIC}),
+    ({QUANTITY}, {QUANTITY}),
+    ({QUANTITY}, set()),
+    (set(), {PRICE}),
+    (set(), set()),
+    ({SSI, PRICE}, {SSI}),
 ]
 
 
 def test_classification_by_type() -> None:
     assert classification_by_type(OUTCOMES) == {
-        SSI: TypeAccuracy(precision=Ratio(1, 1), recall=Ratio(1, 2)),
+        SSI: TypeAccuracy(precision=Ratio(2, 2), recall=Ratio(2, 3)),
         STATIC: TypeAccuracy(precision=Ratio(0, 1), recall=Ratio(0, 0)),
         QUANTITY: TypeAccuracy(precision=Ratio(1, 1), recall=Ratio(1, 2)),
-        PRICE: TypeAccuracy(precision=Ratio(0, 1), recall=Ratio(0, 0)),
+        PRICE: TypeAccuracy(precision=Ratio(0, 1), recall=Ratio(0, 1)),
     }
 
 

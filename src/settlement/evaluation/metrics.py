@@ -57,18 +57,19 @@ class TypeAccuracy:
 
 
 def classification_by_type(
-    outcomes: Sequence[tuple[BreakType | None, BreakType | None]],
+    outcomes: Sequence[tuple[Set[BreakType], Set[BreakType]]],
 ) -> dict[BreakType, TypeAccuracy]:
     """Precision and recall for every break type that appears, actual or predicted.
 
-    Each outcome is (actual, predicted) for one trade, where None means no break. A false
-    break (None, X) lowers X's precision; a miss (X, None) lowers X's recall.
+    Each outcome is (actual types, predicted types) for one trade: sets, because one trade
+    can have two breaks at once (SE-16's REALLY_TWO cases). An empty set means no break.
+    A false break (empty, {X}) lowers X's precision; a miss ({X}, empty) lowers X's recall.
     """
     by_type: dict[BreakType, TypeAccuracy] = {}
     for break_type in BreakType:  # enum order, so the result is the same every run
-        correct = sum(1 for actual, predicted in outcomes if actual == predicted == break_type)
-        called = sum(1 for _, predicted in outcomes if predicted == break_type)
-        real = sum(1 for actual, _ in outcomes if actual == break_type)
+        correct = sum(1 for actual, predicted in outcomes if break_type in actual & predicted)
+        called = sum(1 for _, predicted in outcomes if break_type in predicted)
+        real = sum(1 for actual, _ in outcomes if break_type in actual)
         if called or real:
             by_type[break_type] = TypeAccuracy(
                 precision=Ratio(correct, called), recall=Ratio(correct, real)
