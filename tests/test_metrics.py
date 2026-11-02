@@ -13,6 +13,7 @@ from settlement.evaluation.metrics import (
     classification_by_type,
     cost_per_break,
     false_break_rate,
+    left_for_human_rate,
     match_rate,
     prioritisation_quality,
 )
@@ -53,6 +54,20 @@ def test_false_break_rate() -> None:
 def test_rates_with_no_clean_trades_have_no_value() -> None:
     assert match_rate(set(), {"T1"}).value is None
     assert false_break_rate(set(), {"T1"}).value is None
+
+
+# Left for a human. Worked example:
+#   should be left for a person:  T8 T9
+#   we left unresolved:           T8      T3   (T3 should have been decided: counted elsewhere)
+#   -> 1 / 2
+
+
+def test_left_for_human_rate() -> None:
+    assert left_for_human_rate({"T8", "T9"}, {"T8", "T3"}) == Ratio(1, 2)
+
+
+def test_nothing_to_leave_for_a_human_has_no_rate() -> None:
+    assert left_for_human_rate(set(), {"T3"}).value is None
 
 
 # Classification. Worked example, (actual -> predicted) per trade:
