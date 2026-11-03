@@ -4,7 +4,7 @@ ingestion into the settlement system: MT541/543 instructions and MT548 status me
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from settlement.domain.errors import InvalidIdentifier
@@ -21,6 +21,27 @@ def parse_swift_decimal(value: str) -> Decimal:
     if not _SWIFT_DECIMAL.fullmatch(value):
         raise ValueError(f"Invalid SWIFT decimal value: {value!r}")
     return Decimal(value.replace(",", "."))
+
+
+_SWIFT_DATETIME = re.compile(r"[0-9]{14}")
+
+
+def parse_swift_datetime(text: str) -> datetime:
+    """Parse a SWIFT date-time (98C) into a timezone-aware datetime, read as UTC."""
+    if not _SWIFT_DATETIME.fullmatch(text):
+        raise ValueError(f"Invalid SWIFT date-time value: {text!r}")
+    try:
+        return datetime(
+            int(text[0:4]),
+            int(text[4:6]),
+            int(text[6:8]),
+            int(text[8:10]),
+            int(text[10:12]),
+            int(text[12:14]),
+            tzinfo=UTC,
+        )
+    except ValueError:
+        raise ValueError(f"not a real date-time: {text!r}") from None
 
 
 # SWIFT dates: exactly 8 digits, YYYYMMDD. E.g. "20261005"
