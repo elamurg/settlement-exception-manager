@@ -300,6 +300,7 @@ class StatusMessage:
     related_reference: str  # :20C::RELA//  our instruction's reference (its SEME)
     matched: bool  # :25D::MTCH//  MACH (matched) or NMAT (not matched)
     reason: str | None  # :24B::NMAT//  why it didn't match, e.g. DQUA; None when matched
+    prepared_at: datetime | None = None
 
 
 MATCHING_STATUSES = {"MACH", "NMAT"}
@@ -343,9 +344,12 @@ def parse_mt548(text: str, source: str = "MT548") -> StatusMessage:
             _label(reason),
         )
 
+    prepared = _at_most_one(fields, "98C", "PREP", source)
+
     return StatusMessage(
         reference=_one(fields, "20C", "SEME", source).value,
         related_reference=_one(fields, "20C", "RELA", source).value,
         matched=matched,
         reason=reason.value if reason else None,
+        prepared_at=_convert(prepared, parse_swift_datetime, source) if prepared else None,
     )
