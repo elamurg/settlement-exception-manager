@@ -438,6 +438,32 @@ def test_status_points_back_to_the_instruction() -> None:
     assert parse_mt548(MT548_NOT_MATCHED).related_reference == instruction.reference
 
 
+MT548_WITH_TIME = MT548_MATCHED.replace(":23G:INST\n", ":23G:INST\n:98C::PREP//20261005093000\n")
+
+
+def test_status_reads_its_preparation_time() -> None:
+    assert parse_mt548(MT548_WITH_TIME).prepared_at == datetime(2026, 10, 5, 9, 30, 0, tzinfo=UTC)
+
+
+def test_status_without_time_has_none() -> None:
+    assert parse_mt548(MT548_MATCHED).prepared_at is None
+
+
+def test_bad_preparation_time_names_the_line() -> None:
+    text = MT548_WITH_TIME.replace("PREP//20261005093000", "PREP//20261005253000")
+    with pytest.raises(ParseError, match="^MT548 line 4.*not a real date-time"):
+        parse_mt548(text)
+
+
+def test_two_preparation_times_are_rejected() -> None:
+    text = MT548_WITH_TIME.replace(
+        ":98C::PREP//20261005093000\n",
+        ":98C::PREP//20261005093000\n:98C::PREP//20261005110000\n",
+    )
+    with pytest.raises(ParseError, match="appears more than once"):
+        parse_mt548(text)
+
+
 @pytest.mark.parametrize(
     ("text", "line", "message"),
     [
