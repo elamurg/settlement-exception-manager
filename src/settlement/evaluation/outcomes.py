@@ -31,6 +31,18 @@ class Outcomes:
         return self.clean | frozenset(self.broken) | self.unresolved
 
 
+def combine(parts: Iterable[Outcomes]) -> Outcomes:
+    """Many outcomes as one. Ids are prefixed by where they came from, so none clash."""
+    clean: set[str] = set()
+    unresolved: set[str] = set()
+    broken: dict[str, frozenset[BreakType]] = {}
+    for part in parts:
+        clean |= part.clean
+        unresolved |= part.unresolved
+        broken.update(part.broken)
+    return Outcomes(clean=frozenset(clean), broken=frozen(broken), unresolved=frozenset(unresolved))
+
+
 def trade_key(prefix: str, trade_id: str) -> str:
     return f"{prefix}/{trade_id}"
 
