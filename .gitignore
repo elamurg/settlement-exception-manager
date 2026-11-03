@@ -25,3 +25,6 @@ dist/
 
 #generated data (python -m settlement.generation)
 data/generated/
+
+#evaluation runs (python -m settlement.evaluation.runner); the baseline is in docs/evaluation/
+reports/
