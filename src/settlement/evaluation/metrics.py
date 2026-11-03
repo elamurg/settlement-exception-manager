@@ -54,6 +54,7 @@ def left_for_human_rate(expected_unresolved: Set[str], reported_unresolved: Set[
     Some breaks have two equally plausible causes (SE-16's TWO_CAUSES cases): guessing
     either would be wrong, so leaving it for a human is the right answer. Ids can be
     trades or custodian lines.
+    Read it alongside match rate and recall: leaving everything unresolved scores 100% here.
     """
     return Ratio(len(expected_unresolved & reported_unresolved), len(expected_unresolved))
 
