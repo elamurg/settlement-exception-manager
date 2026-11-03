@@ -1,6 +1,6 @@
 """Test for ISO 15022 message parser"""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -16,6 +16,7 @@ from settlement.ingestion.messages import (
     parse_mt543,
     parse_mt548,
     parse_swift_date,
+    parse_swift_datetime,
     parse_swift_decimal,
     split_fields,
 )
@@ -91,7 +92,42 @@ def test_impossible_date_says_so() -> None:
         parse_swift_date("20261305")
 
 
-# Splitting into fields
+def test_swift_datetime_valid() -> None:
+    """Test that valid SWIFT datetimes are parsed correctly."""
+    assert parse_swift_datetime("20261005123045") == datetime(2026, 10, 5, 12, 30, 45, tzinfo=UTC)
+
+
+def test_swift_datetime_is_read_as_utc() -> None:
+    """SWIFT datetimes are always UTC, so the returned datetime should have tzinfo=UTC."""
+    assert parse_swift_datetime("20261005093000").tzinfo == UTC
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "20261005",
+        "2026100509300",
+        "202610050930000",
+        "2026-10-05T09:30:00",
+        "",
+    ],
+)
+def test_swift_datetime_invalid(text: str) -> None:
+    with pytest.raises(ValueError):
+        parse_swift_datetime(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "20261005253000",
+        "20261005096000",
+        "20261305093000",
+    ],
+)
+def test_impossible_datetime_says_so(text: str) -> None:
+    with pytest.raises(ValueError, match="not a real date-time"):
+        parse_swift_datetime(text)
 
 
 def test_field_with_qualifier() -> None:
