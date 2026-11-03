@@ -1,0 +1,615 @@
+{
+  "name": "deterministic",
+  "run_at": "2026-11-03T15:45:49.884227+00:00",
+  "commit": "6cbf25d",
+  "golden": {
+    "version": "v1",
+    "path": "golden/v1/golden.yaml"
+  },
+  "generated_part": {
+    "trades": 5000,
+    "seed": 42,
+    "generator_version": "1"
+  },
+  "tolerance_set": {
+    "version": "v1",
+    "path": "config/tolerances/v1.yaml"
+  },
+  "scores": {
+    "generated": {
+      "match_rate": {
+        "count": 4460,
+        "total": 4482,
+        "value": 0.9950914770191879
+      },
+      "false_break_rate": {
+        "count": 2,
+        "total": 4482,
+        "value": 0.0004462293618920125
+      },
+      "left_for_human_rate": {
+        "count": 0,
+        "total": 0,
+        "value": null
+      },
+      "by_type": {
+        "SSI_MISMATCH": {
+          "precision": {
+            "count": 152,
+            "total": 152,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 152,
+            "total": 153,
+            "value": 0.9934640522875817
+          }
+        },
+        "QUANTITY_BREAK": {
+          "precision": {
+            "count": 38,
+            "total": 38,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 38,
+            "total": 48,
+            "value": 0.7916666666666666
+          }
+        },
+        "PRICE_BREAK": {
+          "precision": {
+            "count": 47,
+            "total": 47,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 47,
+            "total": 47,
+            "value": 1.0
+          }
+        },
+        "DATE_MISMATCH": {
+          "precision": {
+            "count": 40,
+            "total": 40,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 40,
+            "total": 49,
+            "value": 0.8163265306122449
+          }
+        },
+        "UNMATCHED_INSTRUCTION": {
+          "precision": {
+            "count": 41,
+            "total": 42,
+            "value": 0.9761904761904762
+          },
+          "recall": {
+            "count": 41,
+            "total": 51,
+            "value": 0.803921568627451
+          }
+        },
+        "DUPLICATE_BOOKING": {
+          "precision": {
+            "count": 58,
+            "total": 62,
+            "value": 0.9354838709677419
+          },
+          "recall": {
+            "count": 58,
+            "total": 58,
+            "value": 1.0
+          }
+        },
+        "STATIC_DATA": {
+          "precision": {
+            "count": 93,
+            "total": 93,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 93,
+            "total": 141,
+            "value": 0.6595744680851063
+          }
+        }
+      }
+    },
+    "cases": {
+      "match_rate": {
+        "count": 9,
+        "total": 11,
+        "value": 0.8181818181818182
+      },
+      "false_break_rate": {
+        "count": 0,
+        "total": 11,
+        "value": 0.0
+      },
+      "left_for_human_rate": {
+        "count": 3,
+        "total": 5,
+        "value": 0.6
+      },
+      "by_type": {
+        "SSI_MISMATCH": {
+          "precision": {
+            "count": 1,
+            "total": 1,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 1,
+            "total": 2,
+            "value": 0.5
+          }
+        },
+        "QUANTITY_BREAK": {
+          "precision": {
+            "count": 0,
+            "total": 4,
+            "value": 0.0
+          },
+          "recall": {
+            "count": 0,
+            "total": 0,
+            "value": null
+          }
+        },
+        "PRICE_BREAK": {
+          "precision": {
+            "count": 1,
+            "total": 1,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 1,
+            "total": 3,
+            "value": 0.3333333333333333
+          }
+        },
+        "DATE_MISMATCH": {
+          "precision": {
+            "count": 1,
+            "total": 1,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 1,
+            "total": 1,
+            "value": 1.0
+          }
+        },
+        "UNMATCHED_INSTRUCTION": {
+          "precision": {
+            "count": 0,
+            "total": 3,
+            "value": 0.0
+          },
+          "recall": {
+            "count": 0,
+            "total": 0,
+            "value": null
+          }
+        },
+        "DUPLICATE_BOOKING": {
+          "precision": {
+            "count": 2,
+            "total": 2,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 2,
+            "total": 2,
+            "value": 1.0
+          }
+        },
+        "CORPORATE_ACTION": {
+          "precision": {
+            "count": 0,
+            "total": 0,
+            "value": null
+          },
+          "recall": {
+            "count": 0,
+            "total": 5,
+            "value": 0.0
+          }
+        }
+      }
+    },
+    "all": {
+      "match_rate": {
+        "count": 4469,
+        "total": 4493,
+        "value": 0.9946583574449143
+      },
+      "false_break_rate": {
+        "count": 2,
+        "total": 4493,
+        "value": 0.0004451368795904741
+      },
+      "left_for_human_rate": {
+        "count": 3,
+        "total": 5,
+        "value": 0.6
+      },
+      "by_type": {
+        "SSI_MISMATCH": {
+          "precision": {
+            "count": 153,
+            "total": 153,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 153,
+            "total": 155,
+            "value": 0.9870967741935484
+          }
+        },
+        "QUANTITY_BREAK": {
+          "precision": {
+            "count": 38,
+            "total": 42,
+            "value": 0.9047619047619048
+          },
+          "recall": {
+            "count": 38,
+            "total": 48,
+            "value": 0.7916666666666666
+          }
+        },
+        "PRICE_BREAK": {
+          "precision": {
+            "count": 48,
+            "total": 48,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 48,
+            "total": 50,
+            "value": 0.96
+          }
+        },
+        "DATE_MISMATCH": {
+          "precision": {
+            "count": 41,
+            "total": 41,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 41,
+            "total": 50,
+            "value": 0.82
+          }
+        },
+        "UNMATCHED_INSTRUCTION": {
+          "precision": {
+            "count": 41,
+            "total": 45,
+            "value": 0.9111111111111111
+          },
+          "recall": {
+            "count": 41,
+            "total": 51,
+            "value": 0.803921568627451
+          }
+        },
+        "DUPLICATE_BOOKING": {
+          "precision": {
+            "count": 60,
+            "total": 64,
+            "value": 0.9375
+          },
+          "recall": {
+            "count": 60,
+            "total": 60,
+            "value": 1.0
+          }
+        },
+        "STATIC_DATA": {
+          "precision": {
+            "count": 93,
+            "total": 93,
+            "value": 1.0
+          },
+          "recall": {
+            "count": 93,
+            "total": 141,
+            "value": 0.6595744680851063
+          }
+        },
+        "CORPORATE_ACTION": {
+          "precision": {
+            "count": 0,
+            "total": 0,
+            "value": null
+          },
+          "recall": {
+            "count": 0,
+            "total": 5,
+            "value": 0.0
+          }
+        }
+      }
+    }
+  },
+  "cases": [
+    {
+      "id": "two-fields-off",
+      "kind": "TWO_CAUSES",
+      "passed": true,
+      "records": [
+        {
+          "record": "two-fields-off/T-1",
+          "expected": "unresolved",
+          "got": "unresolved"
+        }
+      ]
+    },
+    {
+      "id": "stock-split",
+      "kind": "CORPORATE_ACTION",
+      "passed": false,
+      "records": [
+        {
+          "record": "stock-split/T-1",
+          "expected": "broken: CORPORATE_ACTION",
+          "got": "broken: QUANTITY_BREAK"
+        }
+      ]
+    },
+    {
+      "id": "within-tolerance",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "within-tolerance/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "small-trade-absolute-floor",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "small-trade-absolute-floor/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "same-security-different-trades",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "same-security-different-trades/T-1",
+          "expected": "clean",
+          "got": "clean"
+        },
+        {
+          "record": "same-security-different-trades/T-2",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "identical-twins-each-matched",
+      "kind": "MUST_BE_CLEAN",
+      "passed": false,
+      "records": [
+        {
+          "record": "identical-twins-each-matched/T-1",
+          "expected": "clean",
+          "got": "unresolved"
+        },
+        {
+          "record": "identical-twins-each-matched/T-2",
+          "expected": "clean",
+          "got": "unresolved"
+        }
+      ]
+    },
+    {
+      "id": "lowercase-bic",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "lowercase-bic/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "free-of-payment",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "free-of-payment/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "ssi-and-price",
+      "kind": "REALLY_TWO",
+      "passed": true,
+      "records": [
+        {
+          "record": "ssi-and-price/T-1",
+          "expected": "broken: PRICE_BREAK, SSI_MISMATCH",
+          "got": "broken: PRICE_BREAK, SSI_MISMATCH"
+        }
+      ]
+    },
+    {
+      "id": "near-match-hides-ssi",
+      "kind": "REALLY_TWO",
+      "passed": false,
+      "records": [
+        {
+          "record": "near-match-hides-ssi/T-1",
+          "expected": "broken: DATE_MISMATCH, SSI_MISMATCH",
+          "got": "broken: DATE_MISMATCH"
+        }
+      ]
+    },
+    {
+      "id": "duplicate-with-price-difference",
+      "kind": "REALLY_TWO",
+      "passed": false,
+      "records": [
+        {
+          "record": "duplicate-with-price-difference/T-1",
+          "expected": "broken: DUPLICATE_BOOKING, PRICE_BREAK",
+          "got": "broken: DUPLICATE_BOOKING"
+        },
+        {
+          "record": "duplicate-with-price-difference/T-2",
+          "expected": "broken: DUPLICATE_BOOKING",
+          "got": "broken: DUPLICATE_BOOKING"
+        }
+      ]
+    },
+    {
+      "id": "lei-and-quantity",
+      "kind": "TWO_CAUSES",
+      "passed": false,
+      "records": [
+        {
+          "record": "lei-and-quantity/T-1",
+          "expected": "unresolved",
+          "got": "broken: UNMATCHED_INSTRUCTION"
+        }
+      ]
+    },
+    {
+      "id": "one-line-two-candidates",
+      "kind": "TWO_CAUSES",
+      "passed": true,
+      "records": [
+        {
+          "record": "one-line-two-candidates/T-1",
+          "expected": "unresolved",
+          "got": "unresolved"
+        },
+        {
+          "record": "one-line-two-candidates/T-2",
+          "expected": "unresolved",
+          "got": "unresolved"
+        }
+      ]
+    },
+    {
+      "id": "opposite-direction",
+      "kind": "TWO_CAUSES",
+      "passed": false,
+      "records": [
+        {
+          "record": "opposite-direction/T-1",
+          "expected": "unresolved",
+          "got": "broken: UNMATCHED_INSTRUCTION"
+        }
+      ]
+    },
+    {
+      "id": "reverse-split",
+      "kind": "CORPORATE_ACTION",
+      "passed": false,
+      "records": [
+        {
+          "record": "reverse-split/T-1",
+          "expected": "broken: CORPORATE_ACTION",
+          "got": "broken: QUANTITY_BREAK"
+        }
+      ]
+    },
+    {
+      "id": "bonus-issue",
+      "kind": "CORPORATE_ACTION",
+      "passed": false,
+      "records": [
+        {
+          "record": "bonus-issue/T-1",
+          "expected": "broken: CORPORATE_ACTION",
+          "got": "broken: QUANTITY_BREAK"
+        }
+      ]
+    },
+    {
+      "id": "isin-change",
+      "kind": "CORPORATE_ACTION",
+      "passed": false,
+      "records": [
+        {
+          "record": "isin-change/T-1",
+          "expected": "broken: CORPORATE_ACTION",
+          "got": "broken: UNMATCHED_INSTRUCTION"
+        }
+      ]
+    },
+    {
+      "id": "split-and-price-off",
+      "kind": "REALLY_TWO",
+      "passed": false,
+      "records": [
+        {
+          "record": "split-and-price-off/T-1",
+          "expected": "broken: CORPORATE_ACTION, PRICE_BREAK",
+          "got": "broken: QUANTITY_BREAK"
+        }
+      ]
+    },
+    {
+      "id": "friday-to-monday",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "friday-to-monday/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "gbp-within-tolerance",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "gbp-within-tolerance/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    },
+    {
+      "id": "reference-missing-but-unique",
+      "kind": "MUST_BE_CLEAN",
+      "passed": true,
+      "records": [
+        {
+          "record": "reference-missing-but-unique/T-1",
+          "expected": "clean",
+          "got": "clean"
+        }
+      ]
+    }
+  ]
+}
