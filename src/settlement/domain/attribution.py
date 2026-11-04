@@ -109,6 +109,42 @@ class ThreeWayResult:
     stray_statuses: tuple[CsdStatus, ...]  # statuses for trades that aren't in the book
 
 
+def latest_statuses(
+    statuses: Sequence[CsdStatus],
+) -> tuple[dict[str, CsdStatus], tuple[CsdStatus, ...]]:
+    """The latest status per instruction and the statusese can't choose between.
+    The CSD sends a new MT548 each time an instruction's status changes, so several per
+    instruction is normal. We never use the order they arrived in: files get merged and
+    re-sent, so that order isn't a fact. Statuses we can't order go to a human."""
+    by_instruction: dict[str, list[CsdStatus]] = {}
+    for each in statuses:
+        group = by_instruction.setdefault(each.instruction_reference, [])
+        if each not in group:
+            group.append(each)
+
+    chosen: dict[str, CsdStatus] = {}
+    conflicts: list[CsdStatus] = []
+    for reference, group in by_instruction.items():
+        latest = _latest(group)
+        if latest is None:
+            conflicts.extend(group)
+        else:
+            chosen[reference] = latest
+    return chosen, tuple(conflicts)
+
+
+def _latest(group: list[CsdStatus]) -> CsdStatus | None:
+    """The newest of one instruction's statuses, or None if we can't tell which it is."""
+    if len({(each.matched, each.reason) for each in group}) == 1:
+        return group[0]  # they all say the same thing, so it doesn't matter which
+    times = [each.at for each in group if each.at is not None]
+    if len(times) < len(group):
+        return None  # they disagree and some have no time: we can't order them
+    newest = max(times)
+    at_newest = [each for each in group if each.at == newest]
+    return at_newest[0] if len(at_newest) == 1 else None
+
+
 def attribute(
     breaks: Sequence[Break],
     clean_trades: Sequence[Trade],
