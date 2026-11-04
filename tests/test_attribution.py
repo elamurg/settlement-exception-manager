@@ -1,5 +1,7 @@
 """Tests for three-way attribution (SE-12a)."""
 
+from datetime import UTC, datetime
+
 import pytest
 
 from settlement.domain.attribution import (
@@ -96,6 +98,21 @@ def test_valid_statuses() -> None:
 def test_invalid_status(kwargs: dict[str, object], message: str) -> None:
     with pytest.raises(InvalidModel, match=message):
         CsdStatus(**kwargs)  # type: ignore[arg-type]
+
+
+# csdstatus time
+def test_status_time_is_optional() -> None:
+    assert MATCHED.at is None
+
+
+def test_status_keeps_an_aware_time() -> None:
+    at = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
+    assert CsdStatus("INSTR-1", matched=True, reason=None, at=at).at == at
+
+
+def test_status_time_without_a_timezone_is_rejected() -> None:
+    with pytest.raises(InvalidModel, match="at must be a timezone-aware datetime"):
+        CsdStatus("INSTR-1", matched=True, reason=None, at=datetime(2026, 10, 5, 9, 30))
 
 
 # Reason codes
