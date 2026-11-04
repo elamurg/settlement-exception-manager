@@ -9,6 +9,7 @@ from settlement.domain.attribution import (
     CsdStatus,
     Leg,
     break_type_for_reason,
+    latest_statuses,
     locate,
 )
 from settlement.domain.errors import InvalidModel
@@ -140,3 +141,70 @@ def test_reason_table_cannot_be_changed() -> None:
 
 def test_unknown_reason_code_is_not_guessed() -> None:
     assert break_type_for_reason("ZZZZ") is None
+
+
+# latest statuses: the CSD sends a new MT548 each time a status changes during the day
+def at(hour: int) -> datetime:
+    return datetime(2026, 10, 5, hour, tzinfo=UTC)
+
+
+def status(matched: bool, hour: int | None, reference: str = "T1") -> CsdStatus:
+    reason = None if matched else "DQUA"
+    return CsdStatus(reference, matched, reason, at(hour) if hour is not None else None)
+
+
+def test_one_status_is_the_answer() -> None:
+    assert latest_statuses([status(True, 9)]) == ({"T1": status(True, 9)}, ())
+
+
+def test_counterparty_fixes_their_side_by_lunchtime() -> None:
+    # NMAT in the morning
+    # MACH after the counterparty corrected their instruction.
+    morning, lunch = status(False, 9), status(True, 12)
+
+    assert latest_statuses([morning, lunch]) == ({"T1": lunch}, ())
+
+
+def test_order_in_the_file_does_not_matter() -> None:
+    morning, lunch = status(False, 9), status(True, 12)
+
+    assert latest_statuses([lunch, morning]) == ({"T1": lunch}, ())
+
+
+def test_a_later_nmat_wins_over_an_earlier_mach() -> None:
+    morning, afternoon = status(True, 9), status(False, 15)
+
+    assert latest_statuses([morning, afternoon]) == ({"T1": afternoon}, ())
+
+
+def test_the_same_message_sent_twice_is_not_a_conflict() -> None:
+    assert latest_statuses([status(True, 9), status(True, 9)]) == ({"T1": status(True, 9)}, ())
+
+
+def test_statuses_that_agree_are_not_a_conflict() -> None:
+    chosen, conflicts = latest_statuses([status(True, 9), status(True, None)])
+
+    assert chosen["T1"].matched is True
+    assert conflicts == ()
+
+
+def test_different_answers_at_the_same_time_are_a_conflict() -> None:
+    mach, nmat = status(True, 9), status(False, 9)
+
+    assert latest_statuses([mach, nmat]) == ({}, (mach, nmat))
+
+
+def test_disagreeing_statuses_without_a_time_are_a_conflict() -> None:
+    mach, nmat = status(True, None), status(False, None)
+
+    assert latest_statuses([mach, nmat]) == ({}, (mach, nmat))
+
+
+def test_one_conflict_does_not_affect_other_instructions() -> None:
+    clash = [status(True, 9, "T1"), status(False, 9, "T1")]
+    fine = status(True, 9, "T2")
+
+    chosen, conflicts = latest_statuses([*clash, fine])
+
+    assert chosen == {"T2": fine}
+    assert conflicts == tuple(clash)
