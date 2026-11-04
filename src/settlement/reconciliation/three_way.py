@@ -57,7 +57,12 @@ def reconcile_three_way(
     two_way = reconcile(book, statement, tolerance_set, raised_at=raised_at)
     # The domain's own version of each MT548, so domain/ doesn't depend on ingestion/.
     csd_statuses = [
-        CsdStatus(message.related_reference, message.matched, message.reason)
+        CsdStatus(
+            message.related_reference,
+            message.matched,
+            message.reason,
+            message.prepared_at,
+        )
         for message in statuses
     ]
     result = attribute(
