@@ -13,7 +13,14 @@ from enum import StrEnum
 from types import MappingProxyType
 
 from settlement.domain.errors import InvalidMatchInput, InvalidModel
-from settlement.domain.models import Break, BreakType, FieldDifference, Trade, require_text
+from settlement.domain.models import (
+    Break,
+    BreakType,
+    FieldDifference,
+    Trade,
+    require_aware,
+    require_text,
+)
 
 
 class Leg(StrEnum):
@@ -37,9 +44,12 @@ class CsdStatus:
     instruction_reference: str  # our instruction's reference (the MT541/543's SEME)
     matched: bool
     reason: str | None  # why it didn't match, e.g. "DQUA"; None when matched
+    at: datetime | None = None
 
     def __post_init__(self) -> None:
         require_text("instruction_reference", self.instruction_reference)
+        if self.at is not None:
+            require_aware("at", self.at)
         if not isinstance(self.matched, bool):
             raise InvalidModel("matched must be True or False.")
         if self.matched and self.reason is not None:
