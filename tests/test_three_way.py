@@ -246,7 +246,15 @@ def test_every_break_has_a_leg(data: GeneratedData) -> None:
     assert set(report.legs) == {brk.break_id for brk in report.breaks}
 
 
-# Scoring against the manifest
+# scoring against the manifest
+def test_the_status_time_reaches_the_domain(data: GeneratedData) -> None:
+    """The time the status was received is passed to the domain,
+    so it can be recorded on the break."""
+    at = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
+    stray = StatusMessage("STAT-X", "NOT-IN-BOOK", True, None, prepared_at=at)
+    _, _, report = run_engine(data, [stray])
+
+    assert [status.at for status in report.stray_statuses] == [at]
 
 
 @pytest.fixture(scope="module")
