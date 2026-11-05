@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from settlement.domain.attribution import CsdStatus, Leg, attribute
-from settlement.domain.errors import InvalidMatchInput
 from settlement.domain.models import Break, BreakType, FieldDifference, StatementLine, Trade
 from settlement.domain.tolerance import ToleranceSet
 from settlement.evaluation.baseline import DEFAULT_TOLERANCES
@@ -181,15 +180,74 @@ def test_status_for_a_trade_we_dont_have_is_stray(trade: Trade) -> None:
     assert result.stray_statuses == (stray,)
 
 
-def test_two_statuses_for_one_instruction_are_rejected(trade: Trade) -> None:
-    with pytest.raises(InvalidMatchInput, match="Two CSD statuses"):
-        attribute(
-            [],
-            [trade],
-            [matched(trade.trade_id), not_matched(trade.trade_id)],
-            [trade.trade_id],
-            raised_at=RAISED_AT,
-        )
+def test_a_later_status_replaces_an_earlier_one(trade: Trade) -> None:
+    # NMAT in the morning, MACH at lunch -> clean.
+    morning = CsdStatus(trade.trade_id, False, "DQUA", datetime(2026, 10, 5, 9, tzinfo=UTC))
+    lunch = CsdStatus(trade.trade_id, True, None, datetime(2026, 10, 5, 12, tzinfo=UTC))
+
+    result = attribute([], [trade], [morning, lunch], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.counterparty_breaks == ()
+    assert result.conflicting_statuses == ()
+
+
+def test_the_reverse_order_gives_a_counterparty_break(trade: Trade) -> None:
+    # MACH, then NMAT later -> counterparty break.
+    morning = CsdStatus(trade.trade_id, True, None, datetime(2026, 10, 5, 9, tzinfo=UTC))
+    later = CsdStatus(trade.trade_id, False, "DQUA", datetime(2026, 10, 5, 12, tzinfo=UTC))
+
+    result = attribute([], [trade], [morning, later], [trade.trade_id], raised_at=RAISED_AT)
+
+    (brk,) = result.counterparty_breaks
+    assert brk.break_type == BreakType.QUANTITY_BREAK
+
+
+def test_conflicting_statuses_go_to_a_human_and_the_run_carries_on(data: GeneratedData) -> None:
+    clashing, other = data.book[0], data.book[1]
+    clash = [matched(clashing.trade_id), not_matched(clashing.trade_id)]
+
+    result = attribute(
+        [],
+        [clashing, other],
+        [*clash, not_matched(other.trade_id)],
+        [clashing.trade_id, other.trade_id],
+        raised_at=RAISED_AT,
+    )
+
+    assert result.conflicting_statuses == tuple(clash)
+    assert result.awaiting_status == ()  # it has statuses: we just can't choose
+    (brk,) = result.counterparty_breaks  # the other trade is still attributed
+    assert brk.ours == other
+
+
+def at_hour(hour: int) -> datetime:
+    return datetime(2026, 10, 5, hour, tzinfo=UTC)
+
+
+def test_a_status_from_after_the_run_is_ignored(trade: Trade) -> None:
+    # Re-running 18:00's reconciliation must not use a status that came in at 19:00.
+    morning = CsdStatus(trade.trade_id, True, None, at_hour(9))
+    too_late = CsdStatus(trade.trade_id, False, "DQUA", at_hour(19))
+
+    result = attribute([], [trade], [morning, too_late], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.counterparty_breaks == ()
+
+
+def test_only_a_late_status_means_still_awaiting(trade: Trade) -> None:
+    too_late = CsdStatus(trade.trade_id, True, None, at_hour(19))
+
+    result = attribute([], [trade], [too_late], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.awaiting_status == (trade.trade_id,)
+
+
+def test_a_status_at_exactly_the_run_time_counts(trade: Trade) -> None:
+    on_time = CsdStatus(trade.trade_id, False, "DQUA", RAISED_AT)
+
+    result = attribute([], [trade], [on_time], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert len(result.counterparty_breaks) == 1
 
 
 # reconcile_three_way(): the engine wrapper
@@ -246,7 +304,27 @@ def test_every_break_has_a_leg(data: GeneratedData) -> None:
     assert set(report.legs) == {brk.break_id for brk in report.breaks}
 
 
-# Scoring against the manifest
+def test_conflicting_statuses_reach_the_report_and_leave_clean(data: GeneratedData) -> None:
+    _, _, before = run_engine(data, as_messages(data.statuses))
+    victim = before.clean[0].match.trade.trade_id  # clean on both legs to start with
+    clash = StatusMessage("STAT-CLASH", victim, False, "DQUA")
+
+    _, _, report = run_engine(data, [*as_messages(data.statuses), clash])
+
+    assert {status.instruction_reference for status in report.conflicting_statuses} == {victim}
+    assert victim not in {result.match.trade.trade_id for result in report.clean}
+    assert len(report.clean) == len(before.clean) - 1
+
+
+# scoring against the manifest
+def test_the_status_time_reaches_the_domain(data: GeneratedData) -> None:
+    """The time the status was received is passed to the domain,
+    so it can be recorded on the break."""
+    at = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
+    stray = StatusMessage("STAT-X", "NOT-IN-BOOK", True, None, prepared_at=at)
+    _, _, report = run_engine(data, [stray])
+
+    assert [status.at for status in report.stray_statuses] == [at]
 
 
 @pytest.fixture(scope="module")
