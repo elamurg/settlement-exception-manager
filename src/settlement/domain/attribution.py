@@ -158,7 +158,9 @@ def attribute(
 
     `breaks` and `clean_trades` come from the two-way reconciliation. Trades it left
     unresolved are neither, so they get no leg here: a human is already looking at them.
+    Statuses timestamped after raised_at are ignored: they hadn't arrived yet.
     """
+    statuses = [each for each in statuses if each.at is None or each.at <= raised_at]
     known = set(book_trade_ids)
     status_for, conflicts = latest_statuses(statuses)
     conflicting = {each.instruction_reference for each in conflicts}
