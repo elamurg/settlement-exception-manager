@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 
-from settlement.domain.errors import InvalidMatchInput, InvalidModel
+from settlement.domain.errors import InvalidModel
 from settlement.domain.models import (
     Break,
     BreakType,
@@ -107,6 +107,7 @@ class ThreeWayResult:
     awaiting_status: tuple[str, ...]  # clean trade ids with no CSD status yet
     unrecognised: tuple[CsdStatus, ...]  # not matched, with a reason code we can't type
     stray_statuses: tuple[CsdStatus, ...]  # statuses for trades that aren't in the book
+    conflicting_statuses: tuple[CsdStatus, ...]
 
 
 def latest_statuses(
@@ -158,13 +159,9 @@ def attribute(
     `breaks` and `clean_trades` come from the two-way reconciliation. Trades it left
     unresolved are neither, so they get no leg here: a human is already looking at them.
     """
-    status_for: dict[str, CsdStatus] = {}
-    for each in statuses:
-        if each.instruction_reference in status_for:
-            raise InvalidMatchInput(
-                f"Two CSD statuses for instruction {each.instruction_reference!r}"
-            )
-        status_for[each.instruction_reference] = each
+    known = set(book_trade_ids)
+    status_for, conflicts = latest_statuses(statuses)
+    conflicting = {each.instruction_reference for each in conflicts}
 
     legs: dict[str, Leg] = {}
     for brk in breaks:
@@ -175,6 +172,8 @@ def attribute(
     awaiting: list[str] = []
     unrecognised: list[CsdStatus] = []
     for trade in clean_trades:
+        if trade.trade_id in conflicting:
+            continue
         status = status_for.get(trade.trade_id)
         leg = locate(book_custodian_break=False, status=status)
         if leg is None:
@@ -190,8 +189,7 @@ def attribute(
         counterparty_breaks.append(brk)
         legs[brk.break_id] = leg
 
-    known = set(book_trade_ids)
-    stray = [each for each in statuses if each.instruction_reference not in known]
+    stray = [each for each in dict.fromkeys(statuses) if each.instruction_reference not in known]
 
     return ThreeWayResult(
         legs=MappingProxyType(legs),
@@ -199,6 +197,9 @@ def attribute(
         awaiting_status=tuple(sorted(awaiting)),
         unrecognised=tuple(sorted(unrecognised, key=lambda s: s.instruction_reference)),
         stray_statuses=tuple(sorted(stray, key=lambda s: s.instruction_reference)),
+        conflicting_statuses=tuple(
+            each for each in conflicts if each.instruction_reference in known
+        ),
     )
 
 
