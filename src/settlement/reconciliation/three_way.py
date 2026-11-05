@@ -29,6 +29,7 @@ class ThreeWayReport:
     awaiting_status: tuple[str, ...]  # clean trade ids with no CSD status yet
     unrecognised: tuple[CsdStatus, ...]  # not matched, with a reason code we can't type
     stray_statuses: tuple[CsdStatus, ...]  # statuses for trades that aren't in the book
+    conflicting_statuses: tuple[CsdStatus, ...]
 
     @property
     def breaks(self) -> tuple[Break, ...]:
@@ -41,6 +42,7 @@ class ThreeWayReport:
         not_clean = {brk.ours.trade_id for brk in self.counterparty_breaks if brk.ours}
         not_clean |= set(self.awaiting_status)
         not_clean |= {status.instruction_reference for status in self.unrecognised}
+        not_clean |= {status.instruction_reference for status in self.conflicting_statuses}
         return tuple(
             result for result in self.two_way.clean if result.match.trade.trade_id not in not_clean
         )
@@ -79,6 +81,7 @@ def reconcile_three_way(
         awaiting_status=result.awaiting_status,
         unrecognised=result.unrecognised,
         stray_statuses=result.stray_statuses,
+        conflicting_statuses=result.conflicting_statuses,
     )
 
 
