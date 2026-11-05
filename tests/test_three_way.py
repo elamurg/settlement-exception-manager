@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 
 from settlement.domain.attribution import CsdStatus, Leg, attribute
-from settlement.domain.errors import InvalidMatchInput
 from settlement.domain.models import Break, BreakType, FieldDifference, StatementLine, Trade
 from settlement.domain.tolerance import ToleranceSet
 from settlement.evaluation.baseline import DEFAULT_TOLERANCES
@@ -181,15 +180,44 @@ def test_status_for_a_trade_we_dont_have_is_stray(trade: Trade) -> None:
     assert result.stray_statuses == (stray,)
 
 
-def test_two_statuses_for_one_instruction_are_rejected(trade: Trade) -> None:
-    with pytest.raises(InvalidMatchInput, match="Two CSD statuses"):
-        attribute(
-            [],
-            [trade],
-            [matched(trade.trade_id), not_matched(trade.trade_id)],
-            [trade.trade_id],
-            raised_at=RAISED_AT,
-        )
+def test_a_later_status_replaces_an_earlier_one(trade: Trade) -> None:
+    # NMAT in the morning, MACH at lunch -> clean.
+    morning = CsdStatus(trade.trade_id, False, "DQUA", datetime(2026, 10, 5, 9, tzinfo=UTC))
+    lunch = CsdStatus(trade.trade_id, True, None, datetime(2026, 10, 5, 12, tzinfo=UTC))
+
+    result = attribute([], [trade], [morning, lunch], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.counterparty_breaks == ()
+    assert result.conflicting_statuses == ()
+
+
+def test_the_reverse_order_gives_a_counterparty_break(trade: Trade) -> None:
+    # MACH, then NMAT later -> counterparty break.
+    morning = CsdStatus(trade.trade_id, True, None, datetime(2026, 10, 5, 9, tzinfo=UTC))
+    later = CsdStatus(trade.trade_id, False, "DQUA", datetime(2026, 10, 5, 12, tzinfo=UTC))
+
+    result = attribute([], [trade], [morning, later], [trade.trade_id], raised_at=RAISED_AT)
+
+    (brk,) = result.counterparty_breaks
+    assert brk.break_type == BreakType.QUANTITY_BREAK
+
+
+def test_conflicting_statuses_go_to_a_human_and_the_run_carries_on(data: GeneratedData) -> None:
+    clashing, other = data.book[0], data.book[1]
+    clash = [matched(clashing.trade_id), not_matched(clashing.trade_id)]  # no times
+
+    result = attribute(
+        [],
+        [clashing, other],
+        [*clash, not_matched(other.trade_id)],
+        [clashing.trade_id, other.trade_id],
+        raised_at=RAISED_AT,
+    )
+
+    assert result.conflicting_statuses == tuple(clash)
+    assert result.awaiting_status == ()  # it has statuses: we just can't choose
+    (brk,) = result.counterparty_breaks  # the other trade is still attributed
+    assert brk.ours == other
 
 
 # reconcile_three_way(): the engine wrapper
