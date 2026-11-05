@@ -304,6 +304,18 @@ def test_every_break_has_a_leg(data: GeneratedData) -> None:
     assert set(report.legs) == {brk.break_id for brk in report.breaks}
 
 
+def test_conflicting_statuses_reach_the_report_and_leave_clean(data: GeneratedData) -> None:
+    _, _, before = run_engine(data, as_messages(data.statuses))
+    victim = before.clean[0].match.trade.trade_id  # clean on both legs to start with
+    clash = StatusMessage("STAT-CLASH", victim, False, "DQUA")
+
+    _, _, report = run_engine(data, [*as_messages(data.statuses), clash])
+
+    assert {status.instruction_reference for status in report.conflicting_statuses} == {victim}
+    assert victim not in {result.match.trade.trade_id for result in report.clean}
+    assert len(report.clean) == len(before.clean) - 1
+
+
 # scoring against the manifest
 def test_the_status_time_reaches_the_domain(data: GeneratedData) -> None:
     """The time the status was received is passed to the domain,
