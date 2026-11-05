@@ -204,7 +204,7 @@ def test_the_reverse_order_gives_a_counterparty_break(trade: Trade) -> None:
 
 def test_conflicting_statuses_go_to_a_human_and_the_run_carries_on(data: GeneratedData) -> None:
     clashing, other = data.book[0], data.book[1]
-    clash = [matched(clashing.trade_id), not_matched(clashing.trade_id)]  # no times
+    clash = [matched(clashing.trade_id), not_matched(clashing.trade_id)]
 
     result = attribute(
         [],
@@ -218,6 +218,36 @@ def test_conflicting_statuses_go_to_a_human_and_the_run_carries_on(data: Generat
     assert result.awaiting_status == ()  # it has statuses: we just can't choose
     (brk,) = result.counterparty_breaks  # the other trade is still attributed
     assert brk.ours == other
+
+
+def at_hour(hour: int) -> datetime:
+    return datetime(2026, 10, 5, hour, tzinfo=UTC)
+
+
+def test_a_status_from_after_the_run_is_ignored(trade: Trade) -> None:
+    # Re-running 18:00's reconciliation must not use a status that came in at 19:00.
+    morning = CsdStatus(trade.trade_id, True, None, at_hour(9))
+    too_late = CsdStatus(trade.trade_id, False, "DQUA", at_hour(19))
+
+    result = attribute([], [trade], [morning, too_late], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.counterparty_breaks == ()
+
+
+def test_only_a_late_status_means_still_awaiting(trade: Trade) -> None:
+    too_late = CsdStatus(trade.trade_id, True, None, at_hour(19))
+
+    result = attribute([], [trade], [too_late], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert result.awaiting_status == (trade.trade_id,)
+
+
+def test_a_status_at_exactly_the_run_time_counts(trade: Trade) -> None:
+    on_time = CsdStatus(trade.trade_id, False, "DQUA", RAISED_AT)
+
+    result = attribute([], [trade], [on_time], [trade.trade_id], raised_at=RAISED_AT)
+
+    assert len(result.counterparty_breaks) == 1
 
 
 # reconcile_three_way(): the engine wrapper
