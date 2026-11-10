@@ -270,7 +270,7 @@ def run_engine(
 
 def as_messages(statuses: tuple[CsdStatus, ...]) -> list[StatusMessage]:
     return [
-        StatusMessage(f"STAT-{n}", s.instruction_reference, s.matched, s.reason)
+        StatusMessage(f"STAT-{n}", s.instruction_reference, s.matched, s.reason, s.at)
         for n, s in enumerate(statuses, start=1)
     ]
 

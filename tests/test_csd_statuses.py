@@ -120,6 +120,14 @@ def test_same_seed_gives_the_same_statuses() -> None:
     assert generate(BUSY).statuses == generate(BUSY).statuses
 
 
+def test_every_status_has_a_time_on_the_trade_date(busy: GeneratedData) -> None:
+    # Fixed, not random: drawing a random time would change everything after it for a seed.
+    trade_date = busy.config.trade_date
+    expected = datetime(trade_date.year, trade_date.month, trade_date.day, 10, tzinfo=UTC)
+
+    assert {status.at for status in busy.statuses} == {expected}
+
+
 @pytest.mark.parametrize("rate", [-0.1, 1.5, float("nan")])
 def test_invalid_counterparty_rate_is_rejected(rate: float) -> None:
     with pytest.raises(ValueError, match="counterparty break rate"):
