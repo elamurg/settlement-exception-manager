@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from settlement.generation.generator import (
     scaled_rates,
 )
 from settlement.ingestion.errors import ParseError
+from settlement.ingestion.messages import parse_mt548
 from settlement.ingestion.statuses import load_statuses, parse_statuses
 
 # Plenty of both kinds of break in a small run.
@@ -133,11 +135,33 @@ def test_statuses_round_trip_through_the_file(busy: GeneratedData, tmp_path: Pat
     read_back = load_statuses(tmp_path / files.STATUSES_FILE)
 
     as_domain = tuple(
-        CsdStatus(message.related_reference, message.matched, message.reason)
+        CsdStatus(message.related_reference, message.matched, message.reason, message.prepared_at)
         for message in read_back
     )
     assert as_domain == busy.statuses
     assert [message.reference for message in read_back[:2]] == ["STAT-000001", "STAT-000002"]
+
+
+def test_statuses_round_trip_through_an_mt548() -> None:
+    at = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
+    text = files.format_mt548(CsdStatus("T-1", True, None, at), reference="STAT-1")
+
+    assert ":98C::PREP//20261005093000" in text
+    assert parse_mt548(text).prepared_at == at
+
+
+def test_status_time_in_another_timezone() -> None:
+    paris_time = datetime(2026, 10, 5, 11, 30, tzinfo=timezone(timedelta(hours=2)))
+    text = files.format_mt548(CsdStatus("T-1", True, None, paris_time), reference="STAT-1")
+
+    assert ":98C::PREP//20261005093000" in text
+    assert parse_mt548(text).prepared_at == paris_time
+
+
+def test_status_without_a_time_writes_no_prep() -> None:
+    text = files.format_mt548(CsdStatus("T-1", True, None), reference="STAT-1")
+
+    assert "98C" not in text
 
 
 def test_manifest_records_legs_and_counterparty_breaks(busy: GeneratedData, tmp_path: Path) -> None:
