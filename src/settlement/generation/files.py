@@ -6,6 +6,7 @@ ISO 8601. Nothing time-dependent is written, so the same seed gives identical fi
 
 import csv
 import json
+from datetime import UTC
 from pathlib import Path
 
 from settlement.domain.attribution import CsdStatus
@@ -119,6 +120,11 @@ def format_mt548(status: CsdStatus, reference: str) -> str:
         ":16R:GENL",
         f":20C::SEME//{reference}",
         ":23G:INST",
+    ]
+    if status.at is not None:
+        # 98C has no timezone, and the reader takes it as UTC, so write it in UTC.
+        lines.append(f":98C::PREP//{status.at.astimezone(UTC):%Y%m%d%H%M%S}")
+    lines += [
         ":16R:LINK",
         f":20C::RELA//{status.instruction_reference}",
         ":16S:LINK",
