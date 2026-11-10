@@ -19,7 +19,7 @@ import math
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
 
@@ -43,6 +43,8 @@ from settlement.generation.universe import (
 )
 
 GENERATOR_VERSION = "1"
+
+STATUS_TIME = time(10, 0)
 
 # Break types a book-versus-statement pair can show. The others need data these two
 # files don't carry (cash balances, corporate action notices).
@@ -363,6 +365,7 @@ def _csd_statuses(
     reasons = sorted(COUNTERPARTY_REASON_WEIGHTS)
     weights = [COUNTERPARTY_REASON_WEIGHTS[reason] for reason in reasons]
     leg_1_trades = {injected.trade_id for injected in breaks}
+    reported_at = datetime.combine(config.trade_date, STATUS_TIME, tzinfo=UTC)
 
     statuses: list[CsdStatus] = []
     counterparty_breaks: list[CounterpartyBreak] = []
@@ -370,11 +373,11 @@ def _csd_statuses(
         trade_id = line.reference  # the custodian echoes our reference
         if trade_id not in leg_1_trades and rng.random() < config.counterparty_break_rate:
             reason = rng.choices(reasons, weights)[0]
-            statuses.append(CsdStatus(trade_id, matched=False, reason=reason))
+            statuses.append(CsdStatus(trade_id, matched=False, reason=reason, at=reported_at))
             counterparty_breaks.append(
                 CounterpartyBreak(REASON_BREAK_TYPES[reason], trade_id, reason)
             )
         else:
-            statuses.append(CsdStatus(trade_id, matched=True, reason=None))
+            statuses.append(CsdStatus(trade_id, matched=True, reason=None, at=reported_at))
     counterparty_breaks.sort(key=lambda item: item.trade_id)
     return tuple(statuses), tuple(counterparty_breaks)
