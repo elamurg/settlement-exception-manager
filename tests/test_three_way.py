@@ -347,6 +347,12 @@ def test_same_seed_gives_the_same_scores(scores_42: ThreeWayScores) -> None:
     assert run_three_way(GenerationConfig(trades=2000, seed=42), DEFAULT_TOLERANCES) == scores_42
 
 
+def test_morning_nmats_do_not_change_the_scores(scores_42: ThreeWayScores) -> None:
+    busy_day = GenerationConfig(trades=2000, seed=42, status_update_rate=0.2)
+
+    assert run_three_way(busy_day, DEFAULT_TOLERANCES) == scores_42
+
+
 def test_a_wrongly_typed_counterparty_break_is_counted(data: GeneratedData) -> None:
     with_breaks = generate(GenerationConfig(trades=300, seed=3, counterparty_break_rate=0.2))
     item = with_breaks.counterparty_breaks[0]

@@ -128,6 +128,35 @@ def test_every_status_has_a_time_on_the_trade_date(busy: GeneratedData) -> None:
     assert {status.at for status in busy.statuses} == {expected}
 
 
+def test_some_trades_get_a_morning_nmat_before_their_mach() -> None:
+    data = generate(replace(BUSY, status_update_rate=0.2))
+    by_trade: dict[str, list[CsdStatus]] = {}
+    for status in data.statuses:
+        by_trade.setdefault(status.instruction_reference, []).append(status)
+    twice = [group for group in by_trade.values() if len(group) == 2]
+
+    assert twice  # the rate did something
+    for group in twice:
+        morning, later = sorted(group, key=lambda s: s.at or datetime.min.replace(tzinfo=UTC))
+        assert (morning.matched, later.matched) == (False, True)
+        assert morning.at is not None and later.at is not None and morning.at < later.at
+
+
+def test_morning_nmats_change_nothing_else() -> None:
+    plain = generate(BUSY)
+    busy_day = generate(replace(BUSY, status_update_rate=0.2))
+
+    assert (busy_day.book, busy_day.statement) == (plain.book, plain.statement)
+    assert busy_day.counterparty_breaks == plain.counterparty_breaks
+    assert set(plain.statuses) <= set(busy_day.statuses)  # only extra statuses, none changed
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.5, float("nan")])
+def test_invalid_status_update_rate_is_rejected(rate: float) -> None:
+    with pytest.raises(ValueError, match="status update rate"):
+        replace(BUSY, status_update_rate=rate)
+
+
 @pytest.mark.parametrize("rate", [-0.1, 1.5, float("nan")])
 def test_invalid_counterparty_rate_is_rejected(rate: float) -> None:
     with pytest.raises(ValueError, match="counterparty break rate"):
