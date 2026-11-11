@@ -3,6 +3,9 @@
 Leg 1 is our book against our custodian's statement. Leg 2 is our instruction against the
 counterparty's, as matched (or not) at the CSD and reported back in an MT548. Knowing the
 leg tells ops who to contact: fix our own booking, or chase the counterparty.
+The CSD sends a new MT548 each time an instruction's status changes, so one instruction
+can have several. We keep the latest by its time, never by its place in the file. When we
+can't tell which is largest, the instruction to a human and the run carries on.
 """
 
 import re
