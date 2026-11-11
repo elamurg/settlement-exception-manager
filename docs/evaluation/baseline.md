@@ -1,5 +1,9 @@
 # Baseline: deterministic reconciliation (SE-11)
 
+> **Superseded by the SE-18 runner.** The current recorded baseline, which covers the generated
+> part *and* the hand-written golden cases, is [`baselines/2026-11-03T1545Z-deterministic.md`](baselines/2026-11-03T1545Z-deterministic.md). Its generated-part scores
+> match the numbers below exactly. This page is kept for its analysis of the generated part.
+
 The first measured result of the full pipeline, before any agent work. **Every later change is
 judged against these numbers**, including the `reference` tiebreak, new tolerance rules and the
 Sprint 5 agents.
