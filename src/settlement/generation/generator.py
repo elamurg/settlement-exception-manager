@@ -13,6 +13,10 @@ an MT548 would report it. Breaks between book and custodian match at the CSD, so
 our side (leg 1). Separately, some clean trades get a counterparty break: book and custodian
 agree, but the CSD reports no match (leg 2). Those use their own random stream, so adding
 them never changes the book or statement a seed produces.
+
+Every status is reported at STATUS_TIME on the trade date. WIth 'status_update_rate', some
+matched trades also get an earlier NMAT that the later MACH replaces, as happend when a
+counterparty fixes their side during the day. Off by default, and on its own random stream.
 """
 
 import math
@@ -44,6 +48,8 @@ from settlement.generation.universe import (
 
 GENERATOR_VERSION = "1"
 
+# when the CSD reports each status, UTC: fixed, not random, so a seed's data doesnt
+# change and before the 18:00 run the evaluation uses so every status counts.
 STATUS_TIME = time(10, 0)
 MORNING_STATUS_TIME = time(8, 0)
 
