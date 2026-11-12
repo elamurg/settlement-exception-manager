@@ -1,0 +1,11 @@
+# Model price list v1. Never edit a released version: copy it to v2.yaml and change that.
+# Dollars per million tokens. Every value is quoted, so it is read as exact text, never a float.
+# Source: Anthropic's published prices, checked 2026-11-12.
+version: "v1"
+currency: "USD"
+models:
+  claude-opus-5-5:
+    input: "4.00"
+    output: "20.00"
+    cache_read: "0.20"
+    cache_write: "5.00"   # 5-minute cache writes: 1.25 x the input price
