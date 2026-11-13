@@ -13,13 +13,17 @@ an MT548 would report it. Breaks between book and custodian match at the CSD, so
 our side (leg 1). Separately, some clean trades get a counterparty break: book and custodian
 agree, but the CSD reports no match (leg 2). Those use their own random stream, so adding
 them never changes the book or statement a seed produces.
+
+Every status is reported at STATUS_TIME on the trade date. WIth 'status_update_rate', some
+matched trades also get an earlier NMAT that the later MACH replaces, as happend when a
+counterparty fixes their side during the day. Off by default, and on its own random stream.
 """
 
 import math
 import random
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from types import MappingProxyType
 
@@ -43,6 +47,11 @@ from settlement.generation.universe import (
 )
 
 GENERATOR_VERSION = "1"
+
+# when the CSD reports each status, UTC: fixed, not random, so a seed's data doesnt
+# change and before the 18:00 run the evaluation uses so every status counts.
+STATUS_TIME = time(10, 0)
+MORNING_STATUS_TIME = time(8, 0)
 
 # Break types a book-versus-statement pair can show. The others need data these two
 # files don't carry (cash balances, corporate action notices).
@@ -95,6 +104,7 @@ class GenerationConfig:
     trade_date: date = DEFAULT_TRADE_DATE
     break_rates: Mapping[BreakType, float] = field(default=DEFAULT_BREAK_RATES)
     counterparty_break_rate: float = DEFAULT_COUNTERPARTY_BREAK_RATE
+    status_update_rate: float = 0.0  # Share of trades getting a morning NMAT before the 10:00 MACH
 
     def __post_init__(self) -> None:
         if self.trades < 1:
@@ -103,6 +113,8 @@ class GenerationConfig:
             0 <= self.counterparty_break_rate <= 1
         ):
             raise ValueError("counterparty break rate must be a finite number from 0 to 1")
+        if not math.isfinite(self.status_update_rate) or not (0 <= self.status_update_rate <= 1):
+            raise ValueError("status update rate must be a finite number from 0 to 1")
         for break_type, rate in self.break_rates.items():
             if break_type not in INJECTABLE:
                 raise ValueError(f"{break_type} can't be injected into a book and statement")
@@ -363,6 +375,7 @@ def _csd_statuses(
     reasons = sorted(COUNTERPARTY_REASON_WEIGHTS)
     weights = [COUNTERPARTY_REASON_WEIGHTS[reason] for reason in reasons]
     leg_1_trades = {injected.trade_id for injected in breaks}
+    reported_at = datetime.combine(config.trade_date, STATUS_TIME, tzinfo=UTC)
 
     statuses: list[CsdStatus] = []
     counterparty_breaks: list[CounterpartyBreak] = []
@@ -370,11 +383,35 @@ def _csd_statuses(
         trade_id = line.reference  # the custodian echoes our reference
         if trade_id not in leg_1_trades and rng.random() < config.counterparty_break_rate:
             reason = rng.choices(reasons, weights)[0]
-            statuses.append(CsdStatus(trade_id, matched=False, reason=reason))
+            statuses.append(CsdStatus(trade_id, matched=False, reason=reason, at=reported_at))
             counterparty_breaks.append(
                 CounterpartyBreak(REASON_BREAK_TYPES[reason], trade_id, reason)
             )
         else:
-            statuses.append(CsdStatus(trade_id, matched=True, reason=None))
+            statuses.append(CsdStatus(trade_id, matched=True, reason=None, at=reported_at))
     counterparty_breaks.sort(key=lambda item: item.trade_id)
-    return tuple(statuses), tuple(counterparty_breaks)
+    return tuple(statuses) + _morning_nmats(config, statuses), tuple(counterparty_breaks)
+
+
+def _morning_nmats(config: GenerationConfig, statuses: list[CsdStatus]) -> tuple[CsdStatus, ...]:
+    """An earlier NMAT for some matched trades: the counterparty fixed their side by
+    STATUS_TIME, so the later MACH replaces it and the answers don't change.
+
+    Its own random stream, so turning this on leaves everything else for a seed as it was.
+    Written after the statuses they precede, so the file order is the wrong way round:
+    only the times say which came first.
+    """
+    rng = random.Random(f"{config.seed}/csd-updates")
+    reasons = sorted(COUNTERPARTY_REASON_WEIGHTS)
+    weights = [COUNTERPARTY_REASON_WEIGHTS[reason] for reason in reasons]
+    morning = datetime.combine(config.trade_date, MORNING_STATUS_TIME, tzinfo=UTC)
+    return tuple(
+        CsdStatus(
+            status.instruction_reference,
+            matched=False,
+            reason=rng.choices(reasons, weights)[0],
+            at=morning,
+        )
+        for status in statuses
+        if status.matched and rng.random() < config.status_update_rate
+    )
