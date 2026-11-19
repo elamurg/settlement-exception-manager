@@ -114,7 +114,7 @@ def parse_classification(data: dict[str, Any], brk: Break) -> Classification:
     confidence = data.get("confidence")
     if not isinstance(confidence, str) or not _CONFIDENCE.fullmatch(confidence):
         raise ValueError(f"confidence must be a string from '0' to '1', got {confidence!r}")
-    explanation = data.get("explaination")
+    explanation = data.get("explanation")
     if not isinstance(explanation, str):
         raise ValueError("explaination must be a string")
 
