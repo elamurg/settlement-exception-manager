@@ -15,6 +15,7 @@ dependencies = [
     "redis",
     "pymongo",
     "pyyaml",
+    "anthropic>=2.3"
 ]
 
 [project.optional-dependencies]

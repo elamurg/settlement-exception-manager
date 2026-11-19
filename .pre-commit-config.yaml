@@ -30,3 +30,4 @@ repos:
         - pytest
         - pyyaml
         - types-pyyaml
+        - anthropic>=2.3
