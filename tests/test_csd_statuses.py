@@ -2,6 +2,7 @@
 
 import json
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,7 @@ from settlement.generation.generator import (
     scaled_rates,
 )
 from settlement.ingestion.errors import ParseError
+from settlement.ingestion.messages import parse_mt548
 from settlement.ingestion.statuses import load_statuses, parse_statuses
 
 # Plenty of both kinds of break in a small run.
@@ -118,6 +120,43 @@ def test_same_seed_gives_the_same_statuses() -> None:
     assert generate(BUSY).statuses == generate(BUSY).statuses
 
 
+def test_every_status_has_a_time_on_the_trade_date(busy: GeneratedData) -> None:
+    # Fixed, not random: drawing a random time would change everything after it for a seed.
+    trade_date = busy.config.trade_date
+    expected = datetime(trade_date.year, trade_date.month, trade_date.day, 10, tzinfo=UTC)
+
+    assert {status.at for status in busy.statuses} == {expected}
+
+
+def test_some_trades_get_a_morning_nmat_before_their_mach() -> None:
+    data = generate(replace(BUSY, status_update_rate=0.2))
+    by_trade: dict[str, list[CsdStatus]] = {}
+    for status in data.statuses:
+        by_trade.setdefault(status.instruction_reference, []).append(status)
+    twice = [group for group in by_trade.values() if len(group) == 2]
+
+    assert twice  # the rate did something
+    for group in twice:
+        morning, later = sorted(group, key=lambda s: s.at or datetime.min.replace(tzinfo=UTC))
+        assert (morning.matched, later.matched) == (False, True)
+        assert morning.at is not None and later.at is not None and morning.at < later.at
+
+
+def test_morning_nmats_change_nothing_else() -> None:
+    plain = generate(BUSY)
+    busy_day = generate(replace(BUSY, status_update_rate=0.2))
+
+    assert (busy_day.book, busy_day.statement) == (plain.book, plain.statement)
+    assert busy_day.counterparty_breaks == plain.counterparty_breaks
+    assert set(plain.statuses) <= set(busy_day.statuses)  # only extra statuses, none changed
+
+
+@pytest.mark.parametrize("rate", [-0.1, 1.5, float("nan")])
+def test_invalid_status_update_rate_is_rejected(rate: float) -> None:
+    with pytest.raises(ValueError, match="status update rate"):
+        replace(BUSY, status_update_rate=rate)
+
+
 @pytest.mark.parametrize("rate", [-0.1, 1.5, float("nan")])
 def test_invalid_counterparty_rate_is_rejected(rate: float) -> None:
     with pytest.raises(ValueError, match="counterparty break rate"):
@@ -133,11 +172,33 @@ def test_statuses_round_trip_through_the_file(busy: GeneratedData, tmp_path: Pat
     read_back = load_statuses(tmp_path / files.STATUSES_FILE)
 
     as_domain = tuple(
-        CsdStatus(message.related_reference, message.matched, message.reason)
+        CsdStatus(message.related_reference, message.matched, message.reason, message.prepared_at)
         for message in read_back
     )
     assert as_domain == busy.statuses
     assert [message.reference for message in read_back[:2]] == ["STAT-000001", "STAT-000002"]
+
+
+def test_statuses_round_trip_through_an_mt548() -> None:
+    at = datetime(2026, 10, 5, 9, 30, tzinfo=UTC)
+    text = files.format_mt548(CsdStatus("T-1", True, None, at), reference="STAT-1")
+
+    assert ":98C::PREP//20261005093000" in text
+    assert parse_mt548(text).prepared_at == at
+
+
+def test_status_time_in_another_timezone() -> None:
+    paris_time = datetime(2026, 10, 5, 11, 30, tzinfo=timezone(timedelta(hours=2)))
+    text = files.format_mt548(CsdStatus("T-1", True, None, paris_time), reference="STAT-1")
+
+    assert ":98C::PREP//20261005093000" in text
+    assert parse_mt548(text).prepared_at == paris_time
+
+
+def test_status_without_a_time_writes_no_prep() -> None:
+    text = files.format_mt548(CsdStatus("T-1", True, None), reference="STAT-1")
+
+    assert "98C" not in text
 
 
 def test_manifest_records_legs_and_counterparty_breaks(busy: GeneratedData, tmp_path: Path) -> None:
