@@ -4,7 +4,7 @@ The fixed exam every change to the pipeline is marked against: the same question
 
 ## What's in it
 
-**The generated part.** 5,000 trades, seed 42. The SE-07 generator is reproducible, so those two numbers plus its manifest are the answer key for thousands of ordinary, one-field breaks. That part is already scored by [`baseline.md`](baseline.md).
+**The generated part.** 5,000 trades, seed 42. The SE-07 generator is reproducible, so those two numbers plus its manifest are the answer key for thousands of ordinary, one-field breaks. It's scored alongside the cases by the SE-18 runner: see [`baselines/2026-11-03T1545Z-deterministic.md`](baselines/2026-11-03T1545Z-deterministic.md).
 
 **21 hand-written hard cases.** The generator only makes easy breaks: one field wrong at a time. These are the messy situations it can't make, in the four kinds the ticket asks for:
 
@@ -19,7 +19,9 @@ Every case records the **right** answer, not what the engine currently does, and
 
 ## Today's engine: 11 of 21
 
-Exact match → tolerance (v1) → fuzzy pass, as on `main` at `4f7ce32`.
+Exact match → tolerance (v1) → fuzzy pass, as on `main` at `4f7ce32`. The SE-18 runner now
+produces this table automatically: see the recorded baseline [`baselines/2026-11-03T1545Z-deterministic.md`](baselines/2026-11-03T1545Z-deterministic.md), and run
+`python -m settlement.evaluation.runner --name <what you changed>` to compare a change with it.
 
 | Case | Kind | Right answer | Engine today |
 |---|---|---|---|
