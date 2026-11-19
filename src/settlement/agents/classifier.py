@@ -71,7 +71,7 @@ class Classification:
         require_text("explaination", self.explanation)
 
 
-def load_classifer_prompt(version: str, root: Path = PROMPTS) -> Prompt:
+def load_classifier_prompt(version: str, root: Path = PROMPTS) -> Prompt:
     return load_prompt(root, CLASSIFIER, version)
 
 
