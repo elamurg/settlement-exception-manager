@@ -30,7 +30,7 @@ class ClassifierSetup:
     limit: int | None = None
 
     def __post_init__(self) -> None:
-        if self.limit is not None:
+        if self.limit is not None and self.limit < 1:
             raise ValueError("limit must be at least 1")
 
 
