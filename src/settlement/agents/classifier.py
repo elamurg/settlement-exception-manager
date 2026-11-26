@@ -31,7 +31,7 @@ CLASSIFIER = "classifier"
 PROMPTS = Path("prompts")
 
 
-_CONFIDENCE = re.compile("0(\.[0-9]{1,2})?|1(\.0{1,2})?")
+_CONFIDENCE = re.compile(r"0(\.[0-9]{1,2})?|1(\.0{1,2})?")
 
 
 SCHEMA: dict[str, Any] = {
