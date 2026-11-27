@@ -11,6 +11,7 @@ import yaml
 from settlement.agents.errors import PricingError
 from settlement.agents.records import Usage
 
+PRICE_LIST_V1 = Path("config/pricing/v1.yaml")
 PER_MILLION = Decimal(1_000_000)
 _TOP_LEVEL_KEYS = {"version", "currency", "models"}
 _PRICE_KEYS = {"input", "output", "cache_read", "cache_write"}

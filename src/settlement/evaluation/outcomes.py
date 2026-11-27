@@ -86,7 +86,7 @@ def actual_from_report(report: ReconciliationReport, prefix: str) -> Outcomes:
     """What the engine did, from its reconciliation report."""
     broken: dict[str, set[BreakType]] = {}
     for brk in report.breaks:
-        broken.setdefault(_break_key(brk, prefix), set()).add(brk.break_type)
+        broken.setdefault(break_key(brk, prefix), set()).add(brk.break_type)
     unresolved = (
         {trade_key(prefix, trade.trade_id) for trade in report.unresolved_trades}
         | {line_key(prefix, line.line_id) for line in report.unresolved_lines}
@@ -104,7 +104,7 @@ def actual_from_report(report: ReconciliationReport, prefix: str) -> Outcomes:
     )
 
 
-def _break_key(brk: Break, prefix: str) -> str:
+def break_key(brk: Break, prefix: str) -> str:
     """A break is on our trade when there is one, otherwise on the custodian's line."""
     if brk.ours is not None:
         return trade_key(prefix, brk.ours.trade_id)
