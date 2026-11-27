@@ -3,6 +3,9 @@
 Leg 1 is our book against our custodian's statement. Leg 2 is our instruction against the
 counterparty's, as matched (or not) at the CSD and reported back in an MT548. Knowing the
 leg tells ops who to contact: fix our own booking, or chase the counterparty.
+The CSD sends a new MT548 each time an instruction's status changes, so one instruction
+can have several. We keep the latest by its time, never by its place in the file. When we
+can't tell which is largest, the instruction to a human and the run carries on.
 """
 
 import re
@@ -12,8 +15,15 @@ from datetime import datetime
 from enum import StrEnum
 from types import MappingProxyType
 
-from settlement.domain.errors import InvalidMatchInput, InvalidModel
-from settlement.domain.models import Break, BreakType, FieldDifference, Trade, require_text
+from settlement.domain.errors import InvalidModel
+from settlement.domain.models import (
+    Break,
+    BreakType,
+    FieldDifference,
+    Trade,
+    require_aware,
+    require_text,
+)
 
 
 class Leg(StrEnum):
@@ -37,9 +47,12 @@ class CsdStatus:
     instruction_reference: str  # our instruction's reference (the MT541/543's SEME)
     matched: bool
     reason: str | None  # why it didn't match, e.g. "DQUA"; None when matched
+    at: datetime | None = None
 
     def __post_init__(self) -> None:
         require_text("instruction_reference", self.instruction_reference)
+        if self.at is not None:
+            require_aware("at", self.at)
         if not isinstance(self.matched, bool):
             raise InvalidModel("matched must be True or False.")
         if self.matched and self.reason is not None:
@@ -97,6 +110,43 @@ class ThreeWayResult:
     awaiting_status: tuple[str, ...]  # clean trade ids with no CSD status yet
     unrecognised: tuple[CsdStatus, ...]  # not matched, with a reason code we can't type
     stray_statuses: tuple[CsdStatus, ...]  # statuses for trades that aren't in the book
+    conflicting_statuses: tuple[CsdStatus, ...]
+
+
+def latest_statuses(
+    statuses: Sequence[CsdStatus],
+) -> tuple[dict[str, CsdStatus], tuple[CsdStatus, ...]]:
+    """The latest status per instruction and the statusese can't choose between.
+    The CSD sends a new MT548 each time an instruction's status changes, so several per
+    instruction is normal. We never use the order they arrived in: files get merged and
+    re-sent, so that order isn't a fact. Statuses we can't order go to a human."""
+    by_instruction: dict[str, list[CsdStatus]] = {}
+    for each in statuses:
+        group = by_instruction.setdefault(each.instruction_reference, [])
+        if each not in group:
+            group.append(each)
+
+    chosen: dict[str, CsdStatus] = {}
+    conflicts: list[CsdStatus] = []
+    for reference, group in by_instruction.items():
+        latest = _latest(group)
+        if latest is None:
+            conflicts.extend(group)
+        else:
+            chosen[reference] = latest
+    return chosen, tuple(conflicts)
+
+
+def _latest(group: list[CsdStatus]) -> CsdStatus | None:
+    """The newest of one instruction's statuses, or None if we can't tell which it is."""
+    if len({(each.matched, each.reason) for each in group}) == 1:
+        return group[0]  # they all say the same thing, so it doesn't matter which
+    times = [each.at for each in group if each.at is not None]
+    if len(times) < len(group):
+        return None  # they disagree and some have no time: we can't order them
+    newest = max(times)
+    at_newest = [each for each in group if each.at == newest]
+    return at_newest[0] if len(at_newest) == 1 else None
 
 
 def attribute(
@@ -111,14 +161,12 @@ def attribute(
 
     `breaks` and `clean_trades` come from the two-way reconciliation. Trades it left
     unresolved are neither, so they get no leg here: a human is already looking at them.
+    Statuses timestamped after raised_at are ignored: they hadn't arrived yet.
     """
-    status_for: dict[str, CsdStatus] = {}
-    for each in statuses:
-        if each.instruction_reference in status_for:
-            raise InvalidMatchInput(
-                f"Two CSD statuses for instruction {each.instruction_reference!r}"
-            )
-        status_for[each.instruction_reference] = each
+    statuses = [each for each in statuses if each.at is None or each.at <= raised_at]
+    known = set(book_trade_ids)
+    status_for, conflicts = latest_statuses(statuses)
+    conflicting = {each.instruction_reference for each in conflicts}
 
     legs: dict[str, Leg] = {}
     for brk in breaks:
@@ -129,6 +177,8 @@ def attribute(
     awaiting: list[str] = []
     unrecognised: list[CsdStatus] = []
     for trade in clean_trades:
+        if trade.trade_id in conflicting:
+            continue
         status = status_for.get(trade.trade_id)
         leg = locate(book_custodian_break=False, status=status)
         if leg is None:
@@ -144,8 +194,7 @@ def attribute(
         counterparty_breaks.append(brk)
         legs[brk.break_id] = leg
 
-    known = set(book_trade_ids)
-    stray = [each for each in statuses if each.instruction_reference not in known]
+    stray = [each for each in dict.fromkeys(statuses) if each.instruction_reference not in known]
 
     return ThreeWayResult(
         legs=MappingProxyType(legs),
@@ -153,6 +202,9 @@ def attribute(
         awaiting_status=tuple(sorted(awaiting)),
         unrecognised=tuple(sorted(unrecognised, key=lambda s: s.instruction_reference)),
         stray_statuses=tuple(sorted(stray, key=lambda s: s.instruction_reference)),
+        conflicting_statuses=tuple(
+            each for each in conflicts if each.instruction_reference in known
+        ),
     )
 
 

@@ -1,6 +1,6 @@
 """Test for ISO 15022 message parser"""
 
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
@@ -16,6 +16,7 @@ from settlement.ingestion.messages import (
     parse_mt543,
     parse_mt548,
     parse_swift_date,
+    parse_swift_datetime,
     parse_swift_decimal,
     split_fields,
 )
@@ -91,7 +92,42 @@ def test_impossible_date_says_so() -> None:
         parse_swift_date("20261305")
 
 
-# Splitting into fields
+def test_swift_datetime_valid() -> None:
+    """Test that valid SWIFT datetimes are parsed correctly."""
+    assert parse_swift_datetime("20261005123045") == datetime(2026, 10, 5, 12, 30, 45, tzinfo=UTC)
+
+
+def test_swift_datetime_is_read_as_utc() -> None:
+    """SWIFT datetimes are always UTC, so the returned datetime should have tzinfo=UTC."""
+    assert parse_swift_datetime("20261005093000").tzinfo == UTC
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "20261005",
+        "2026100509300",
+        "202610050930000",
+        "2026-10-05T09:30:00",
+        "",
+    ],
+)
+def test_swift_datetime_invalid(text: str) -> None:
+    with pytest.raises(ValueError):
+        parse_swift_datetime(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "20261005253000",
+        "20261005096000",
+        "20261305093000",
+    ],
+)
+def test_impossible_datetime_says_so(text: str) -> None:
+    with pytest.raises(ValueError, match="not a real date-time"):
+        parse_swift_datetime(text)
 
 
 def test_field_with_qualifier() -> None:
@@ -400,6 +436,32 @@ def test_status_points_back_to_the_instruction() -> None:
     instruction = parse_mt541(MT541)
 
     assert parse_mt548(MT548_NOT_MATCHED).related_reference == instruction.reference
+
+
+MT548_WITH_TIME = MT548_MATCHED.replace(":23G:INST\n", ":23G:INST\n:98C::PREP//20261005093000\n")
+
+
+def test_status_reads_its_preparation_time() -> None:
+    assert parse_mt548(MT548_WITH_TIME).prepared_at == datetime(2026, 10, 5, 9, 30, 0, tzinfo=UTC)
+
+
+def test_status_without_time_has_none() -> None:
+    assert parse_mt548(MT548_MATCHED).prepared_at is None
+
+
+def test_bad_preparation_time_names_the_line() -> None:
+    text = MT548_WITH_TIME.replace("PREP//20261005093000", "PREP//20261005253000")
+    with pytest.raises(ParseError, match="^MT548 line 4.*not a real date-time"):
+        parse_mt548(text)
+
+
+def test_two_preparation_times_are_rejected() -> None:
+    text = MT548_WITH_TIME.replace(
+        ":98C::PREP//20261005093000\n",
+        ":98C::PREP//20261005093000\n:98C::PREP//20261005110000\n",
+    )
+    with pytest.raises(ParseError, match="appears more than once"):
+        parse_mt548(text)
 
 
 @pytest.mark.parametrize(
