@@ -2,6 +2,9 @@
 
 Run it with: python -m settlement.evaluation.runner --name deterministic
 
+Add the break classifier (SE-20) with --classifier v1. That calls the Claude API and costs
+money, so --limit N classifies only the first N records with breaks: a cheap sample.
+
 Each run writes <time>-<name>.md for people and <time>-<name>.json for comparing runs, into
 reports/ (ignored by git). The recorded baseline is a run written to docs/evaluation/ on
 purpose, so it's committed: every later change is judged against it.
@@ -11,19 +14,30 @@ import argparse
 import json
 import subprocess
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, time
 from pathlib import Path
 from typing import Any
 
-from settlement.domain.models import BreakType
+from settlement.agents.anthropic_client import AnthropicModelClient
+from settlement.agents.classifier import load_classifier_prompt
+from settlement.agents.ledger import InMemoryLedger
+from settlement.agents.pricing import PRICE_LIST_V1, load_price_list
+from settlement.agents.runner import AgentContext
+from settlement.domain.models import Break, BreakType
 from settlement.evaluation.baseline import DEFAULT_TOLERANCES
+from settlement.evaluation.classification import (
+    ClassifierScores,
+    ClassifierSetup,
+    score_classifier,
+)
 from settlement.evaluation.golden import GOLDEN_V1, CaseKind, load_golden_set
-from settlement.evaluation.metrics import Ratio
+from settlement.evaluation.metrics import Ratio, TypeAccuracy
 from settlement.evaluation.outcomes import (
     Outcomes,
     actual_from_report,
+    break_key,
     combine,
     expected_for_case,
     expected_for_generated,
@@ -67,10 +81,17 @@ class RunResult:
     cases: Scores
     overall: Scores
     case_results: tuple[CaseResult, ...]
+    classification: ClassifierScores | None = None  # only when the classifier was run
 
 
-def run(config: RunConfig, run_at: datetime, commit: str) -> RunResult:
-    """Reconcile the generated part and every hand-written case, and score them."""
+def run(
+    config: RunConfig,
+    run_at: datetime,
+    commit: str,
+    classifier: ClassifierSetup | None = None,
+) -> RunResult:
+    """Reconcile the generated part and every hand-written case, and score them.
+    With a classifier, also classify the breaks the engine found and score that too."""
     golden = load_golden_set(config.golden)
     tolerance_set = load_tolerance_set(config.tolerances)
     # Fixed, not the wall clock, so the same code always gives the same scores.
@@ -86,9 +107,11 @@ def run(config: RunConfig, run_at: datetime, commit: str) -> RunResult:
         )
     generated_expected = expected_for_generated(data)
     generated_actual = actual_from_report(report, "generated")
+    generated_found = [(break_key(brk, "generated"), brk) for brk in report.breaks]
 
     case_expected: list[Outcomes] = []
     case_actual: list[Outcomes] = []
+    case_found: list[tuple[str, Break]] = []
     case_results = []
     for case in golden.cases:
         # The engine can't read corporate-action notices yet, so they aren't passed in.
@@ -97,6 +120,7 @@ def run(config: RunConfig, run_at: datetime, commit: str) -> RunResult:
         actual = actual_from_report(case_report, case.case_id)
         case_expected.append(expected)
         case_actual.append(actual)
+        case_found += [(break_key(brk, case.case_id), brk) for brk in case_report.breaks]
         rows = tuple(
             (record, describe(expected, record), describe(actual, record))
             for record in sorted(expected.records)
@@ -105,6 +129,10 @@ def run(config: RunConfig, run_at: datetime, commit: str) -> RunResult:
 
     all_expected = combine([generated_expected, *case_expected])
     all_actual = combine([generated_actual, *case_actual])
+    classification = None
+    if classifier is not None:
+        # Hand-written cases first: they're the hard ones, so a small --limit still covers them.
+        classification = score_classifier(case_found + generated_found, all_expected, classifier)
     return RunResult(
         config=config,
         run_at=run_at,
@@ -117,6 +145,7 @@ def run(config: RunConfig, run_at: datetime, commit: str) -> RunResult:
         cases=score(combine(case_expected), combine(case_actual)),
         overall=score(all_expected, all_actual),
         case_results=tuple(case_results),
+        classification=classification,
     )
 
 
@@ -151,7 +180,7 @@ def format_markdown(result: RunResult) -> str:
         f"| Generated part | {result.trades} trades, seed {result.seed}, "
         f"generator v{GENERATOR_VERSION} |",
         f"| Tolerance set | {result.tolerance_set_version} ({config.tolerances}) |",
-        "| Pipeline | exact match → tolerance → fuzzy pass (deterministic, no agents) |",
+        f"| Pipeline | {_pipeline(result.classification)} |",
         "| Corporate-action notices | not given to the engine: it can't read them yet |",
         "",
         "## Scores",
@@ -171,8 +200,8 @@ def format_markdown(result: RunResult) -> str:
         lines.append(f"| {label} | {' | '.join(cells)} |")
     lines += [
         "",
-        "Prioritisation, resolution acceptance and cost per break: not measured yet. They need",
-        "an ideal queue, resolutions and model costs, which come with the agents.",
+        "Prioritisation and resolution acceptance: not measured yet. They need an ideal queue",
+        "and resolutions, which come with later agents.",
         "",
         "## By break type (all)",
         "",
@@ -197,7 +226,54 @@ def format_markdown(result: RunResult) -> str:
         got = "; ".join(f"{_short(record)} {have}" for record, _, have in case.rows)
         mark = "✅" if case.passed else "❌"
         lines.append(f"| `{case.case_id}` | {case.kind.value} | {right} | {got} | {mark} |")
+    if result.classification is not None:
+        lines += _classifier_markdown(result.classification)
     return "\n".join(lines) + "\n"
+
+
+def _pipeline(classification: ClassifierScores | None) -> str:
+    deterministic = "exact match → tolerance → fuzzy pass"
+    if classification is None:
+        return f"{deterministic} (deterministic, no agents)"
+    return f"{deterministic} → classifier {classification.prompt_version}"
+
+
+def _classifier_markdown(scores: ClassifierScores) -> list[str]:
+    sample = f", the first {scores.limit} only" if scores.limit else ""
+    per_break = scores.cost_per_break
+    lines = [
+        "",
+        f"## Classifier: prompt {scores.prompt_version} (`{scores.prompt_fingerprint}`)",
+        "",
+        f"{scores.breaks} breaks on {scores.records} records{sample}. "
+        f"Cost ${scores.cost:.4f}"
+        + (f", ${per_break:.4f} per break." if per_break is not None else ".")
+        + f" {len(scores.failed)} got no answer.",
+        "",
+        "Both columns are scored on the same records: the engine's label, and the classifier's",
+        "answer for the same break without that label.",
+        "",
+        "| Break type | Engine precision | Engine recall | Classifier precision | "
+        "Classifier recall |",
+        "|---|---|---|---|---|",
+    ]
+    for break_type in BreakType:
+        engine = scores.engine.get(break_type)
+        model = scores.classifier.get(break_type)
+        if engine is None and model is None:
+            continue
+        cells = [*_accuracy_cells(engine), *_accuracy_cells(model)]
+        lines.append(f"| {break_type.value} | {' | '.join(cells)} |")
+    if scores.failed:
+        lines += ["", "### No answer", ""]
+        lines += [f"- `{break_id}`: {why}" for break_id, why in scores.failed]
+    return lines
+
+
+def _accuracy_cells(accuracy: TypeAccuracy | None) -> list[str]:
+    if accuracy is None:
+        return ["n/a", "n/a"]
+    return [_ratio(accuracy.precision), _ratio(accuracy.recall)]
 
 
 def to_json(result: RunResult) -> dict[str, Any]:
@@ -230,6 +306,23 @@ def to_json(result: RunResult) -> dict[str, Any]:
             }
             for case in result.case_results
         ],
+        "classifier": _classifier_json(result.classification),
+    }
+
+
+def _classifier_json(scores: ClassifierScores | None) -> dict[str, Any] | None:
+    if scores is None:
+        return None
+    return {
+        "prompt_version": scores.prompt_version,
+        "prompt_fingerprint": scores.prompt_fingerprint,
+        "limit": scores.limit,
+        "records": scores.records,
+        "breaks": scores.breaks,
+        "cost": str(scores.cost),  # a string, so the Decimal isn't rounded through a float
+        "failed": [{"break_id": break_id, "why": why} for break_id, why in scores.failed],
+        "engine": _by_type_json(scores.engine),
+        "classifier": _by_type_json(scores.classifier),
     }
 
 
@@ -247,13 +340,17 @@ def _scores_json(scores: Scores) -> dict[str, Any]:
         "match_rate": _ratio_json(scores.match_rate),
         "false_break_rate": _ratio_json(scores.false_break_rate),
         "left_for_human_rate": _ratio_json(scores.left_for_human_rate),
-        "by_type": {
-            break_type.value: {
-                "precision": _ratio_json(accuracy.precision),
-                "recall": _ratio_json(accuracy.recall),
-            }
-            for break_type, accuracy in scores.by_type.items()
-        },
+        "by_type": _by_type_json(scores.by_type),
+    }
+
+
+def _by_type_json(by_type: Mapping[BreakType, TypeAccuracy]) -> dict[str, Any]:
+    return {
+        break_type.value: {
+            "precision": _ratio_json(accuracy.precision),
+            "recall": _ratio_json(accuracy.recall),
+        }
+        for break_type, accuracy in by_type.items()
     }
 
 
@@ -281,16 +378,40 @@ def main(argv: Sequence[str] | None = None) -> None:
     parser.add_argument("--tolerances", type=Path, default=DEFAULT_TOLERANCES)
     parser.add_argument("--golden", type=Path, default=GOLDEN_V1)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="where to write reports")
+    parser.add_argument(
+        "--classifier",
+        metavar="VERSION",
+        help="also run the break classifier with this prompt, e.g. v1 (calls the API: costs money)",
+    )
+    parser.add_argument(
+        "--limit", type=int, help="with --classifier: classify only the first N records"
+    )
     args = parser.parse_args(argv)
+    if args.limit is not None and (args.classifier is None or args.limit < 1):
+        parser.error("--limit needs --classifier and must be at least 1")
 
     config = RunConfig(name=args.name, tolerances=args.tolerances, golden=args.golden)
-    result = run(config, run_at=datetime.now(UTC), commit=current_commit())
+    classifier = None
+    if args.classifier is not None:
+        context = AgentContext(
+            client=AnthropicModelClient(),  # reads ANTHROPIC_API_KEY from the environment
+            ledger=InMemoryLedger(),
+            prices=load_price_list(PRICE_LIST_V1),
+            clock=lambda: datetime.now(UTC),
+        )
+        classifier = ClassifierSetup(
+            prompt=load_classifier_prompt(args.classifier), context=context, limit=args.limit
+        )
+    result = run(config, run_at=datetime.now(UTC), commit=current_commit(), classifier=classifier)
     markdown, data = write_reports(result, args.out)
     passed_count = sum(case.passed for case in result.case_results)
     print(
         f"{config.name}: match rate {_ratio(result.overall.match_rate)}, "
         f"{passed_count} of {len(result.case_results)} cases passed"
     )
+    if result.classification is not None:
+        spent = result.classification
+        print(f"classifier {spent.prompt_version}: ${spent.cost:.4f} for {spent.breaks} breaks")
     print(f"Wrote {markdown} and {data}")
 
 
